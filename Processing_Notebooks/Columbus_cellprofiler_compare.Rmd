@@ -1,0 +1,160 @@
+#Load libraries
+```{r}
+library(tidyverse)
+library(ggplot2)
+```
+
+#Load data
+```{r}
+cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp <- rbind(cp_rep1, cp_rep2, cp_rep3, cp_rep4)
+columbus <- read.csv("../Input/All exp BMC.csv")
+nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
+```
+
+#Mutate and plotr
+```{r}
+#only keep needed colomns so rbind works
+columbus <- columbus %>%
+  dplyr::filter(exp %in% c("Definitive_rep1",
+                           "Definitive_rep2",
+                           "Definitive_rep3",
+                           "Definitive_rep4")) %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp"))) %>%
+  mutate(source = "Columbus")
+
+columbus <- columbus %>%
+  # rename exp IDs to reps
+  dplyr::mutate(
+    exp = dplyr::case_when(
+      exp %in% c("Definitive_rep1") ~ "rep1",
+      exp %in% c("Definitive_rep2") ~ "rep2",
+      exp %in% c("Definitive_rep3") ~ "rep3",
+      exp %in% c("Definitive_rep4") ~ "rep4",
+      TRUE ~ exp
+    )
+  )
+
+cp <- cp %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name"))) %>%
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+#nyffy boy doesnt have bmdl or bmdu set to 0
+
+nyf <- nyf %>%
+  rename(
+    name = Chem.Name,
+    bmd  = CP.POD,
+    exp  = DosePlateID
+  ) %>%
+  filter(!name %in% c(
+    "Rotenone",
+    "Oxibendazole",
+    "Metoclopramide"
+  ))
+#Eunnara did median
+
+nyf <- nyf %>% 
+  group_by(name) %>% 
+  summarise(
+    bmd = median(bmd, na.rm = TRUE)
+  )    %>% 
+mutate(
+    bmdl = 0,
+    bmdu = 0,
+    exp = "median",
+    source = "nyf"
+  )%>%
+  dplyr::select(bmd, name, bmdl, bmdu, source, exp)
+
+
+joined <- rbind(columbus, cp, nyf) %>%
+  group_by(name) %>%
+  ungroup()
+
+shape_list <- c("median" = 15, "rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+```
+
+
+#boots
+```{r}
+boot_median_ci <- function(x, nboot = 1000) {
+  boots <- replicate(
+    nboot,
+    median(sample(x, replace = TRUE), na.rm = TRUE)
+  )
+
+  c(
+    bmd = median(x, na.rm = TRUE),
+    bmdl = quantile(boots, 0.025, na.rm = TRUE),
+    bmdu = quantile(boots, 0.975, na.rm = TRUE)
+  )
+}
+
+columbus_avg <- columbus %>%
+  group_by(name) %>%
+  summarise(
+    tmp = list(boot_median_ci(bmd)),
+    .groups = "drop"
+  ) %>%
+  tidyr::unnest_wider(tmp) %>%
+  mutate(
+    source = "Columbus",
+    exp = "bootstrap median"
+  )
+
+cp_avg <- cp %>%
+  group_by(name) %>%
+  summarise(
+    tmp = list(boot_median_ci(bmd)),
+    .groups = "drop"
+  ) %>%
+  tidyr::unnest_wider(tmp) %>%
+  mutate(
+    source = "CP",
+    exp = "bootstrap median"
+  )
+
+joined <- bind_rows(columbus_avg, cp_avg, nyf)
+
+ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = `bmdl.2.5%`, xmax = `bmdu.97.5%`), width = 0.4) +
+  scale_x_log10() +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+```
+

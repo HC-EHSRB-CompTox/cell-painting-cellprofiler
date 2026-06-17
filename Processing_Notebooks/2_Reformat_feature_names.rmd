@@ -1,0 +1,232 @@
+#Load libraries
+```{r}
+library(viridis)
+library(RColorBrewer)
+library(ggplot2)
+library(cowplot)
+library(data.table)
+library(tidyverse)
+```
+#Categorize features
+```{r}
+test_chem_cc <- fread(
+  file.path(pipeline_output_path, "test_chem_cc.csv")
+)
+cell_count <- as.data.frame(test_chem_cc)
+
+#ASK EUNNARA i just added 1 to everyone
+cell_count$Metadata_Concentration <- cell_count$Metadata_Concentration + 1
+
+#I added group by plate to everything
+cell_count_avg <- cell_count %>%
+  group_by(Metadata_Chemical, Metadata_Concentration, Metadata_Plate) %>%
+  summarise(Average_cc = mean(cell_count),
+            SD = sd(cell_count))
+
+cell_count_avg$relative_cc <- cell_count_avg$Average_cc/cell_count_avg[cell_count_avg$Metadata_Chemical== ctrl_group, ]$Average_cc
+
+cell_count_avg$SD_rel_cc <- cell_count_avg$relative_cc*sqrt((cell_count_avg$SD/cell_count_avg$Average_cc)^2 + (cell_count_avg[cell_count_avg$Metadata_Chemical == ctrl_group, ]$SD/cell_count_avg[cell_count_avg$Metadata_Chemical == ctrl_group, ]$Average_cc)^2)
+#####cut-off for reduction in cell count#####
+cytotoxic_conc <- cell_count_avg %>%
+  filter(relative_cc < 0.5)
+```
+#Plotting
+```{r}
+relative_cell_count <- ggplot(cell_count_avg[cell_count_avg$Metadata_Chemical != ctrl_group,], aes(x = Metadata_Concentration, y = relative_cc, colour = Metadata_Chemical)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = relative_cc - SD_rel_cc, ymax = relative_cc + SD_rel_cc), width = 0.05) +
+    theme_bw() + 
+    theme(legend.position="none") +
+    scale_x_log10() +
+    ylim(0, 1.6) +
+    geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+    facet_wrap(vars(Metadata_Chemical), scales = "free")
+relative_cell_count
+plate_no <- unique(cell_count$Metadata_Plate)
+
+plate_plot <- lapply(plate_no, function(x){
+  
+  plate_data <- cell_count[cell_count$Metadata_Plate == x, ]
+  
+  # Create an ordered factor for Chemical with ctrl_group first
+  plate_data$Metadata_Chemical <- factor(plate_data$Metadata_Chemical, 
+                                levels = c(ctrl_group, setdiff(unique(plate_data$Metadata_Chemical), ctrl_group)), 
+                                ordered = TRUE)
+  
+  y_min <- min(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count)
+  y_max <- max(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count)
+  
+  plate_plot <- ggplot(plate_data, aes(x=Metadata_Concentration, y=cell_count, colour=Metadata_Chemical)) + 
+    geom_point() + 
+   # geom_errorbar(aes(ymin = relative_cc - SD_rel_cc, ymax = relative_cc + SD_rel_cc), width = 0.05) +
+    geom_ribbon(aes(ymin = y_min, ymax = y_max), fill = "grey70", alpha = 0.5) +        
+    geom_hline(yintercept = median(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count), linetype = "dashed", color = "red") +
+    scale_y_continuous() +
+    ylim(min(plate_data$cell_count)-50, max(plate_data$cell_count)+50) +
+    scale_x_log10() +
+    theme(legend.position="none") +
+    scale_color_brewer(palette = "Paired") +
+    geom_text(aes(label = Metadata_Well), size = 2, vjust = -1, hjust = 0.5) +
+    facet_wrap(vars(Metadata_Chemical), scales = "free") +
+    ggtitle(paste0("Plate ", x))
+  
+    plate_plot
+  }) 
+
+nrow <- length(plate_no)
+
+combined_plot <- do.call(plot_grid, c(plate_plot, nrow = nrow))
+
+ggsave(file.path(plots, "Cell count by chemical_all plates.png"), combined_plot, width = 20, height = 60,units = "cm")
+
+ggsave(file.path(plots,"Relative cell count.png"), relative_cell_count, width = 50, height = 30, units = "cm")
+
+ctrl_plot <- ggplot(cell_count[cell_count$Metadata_Chemical == ctrl_group,], aes(x= as.character(Metadata_Plate), y=cell_count, colour=Metadata_Plate)) + 
+  geom_point() + 
+  scale_y_continuous() +
+  theme(legend.position="none") +
+  xlab("Plate Number") +
+  ylab("Cell count") +
+  geom_text(aes(label = Metadata_Well), size = 2, vjust = -1, hjust = 0.5) +
+  ggtitle(paste0("Vehicle Control (",ctrl_group, ")"))
+
+ctrl_plot
+ggsave(file.path(plots, "Cell count_ctrl_all plates.png"), ctrl_plot, width = 20, height = 60,units = "cm")
+
+## Cell density heatmap
+
+plate_cell_count <- test_chem_cc
+
+plate_cell_count <- plate_cell_count %>%
+  mutate(Metadata_Well = str_trim(Metadata_Well)) %>%
+  separate(Metadata_Well, into = c("Row", "Column"), sep = "(?<=^.)") %>%
+  separate(Column, into = c("Column", "Metadata_Plate"), sep = "_", fill = "right", extra = "merge")
+
+plate_cell_count$Column <- factor(plate_cell_count$Column, levels = as.character(1:12))
+
+plate_cell_count$Row <- factor(plate_cell_count$Row, levels = LETTERS[8:1])
+
+cellcount_hm <- ggplot(plate_cell_count, aes(x = Column, y = Row, fill = cell_count)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  theme(title = element_text(size = 13),
+        axis.title.x = element_text(size = 16, margin = margin(t=15)),
+        axis.title.y = element_text(size = 16, margin = margin(r=15)),
+        axis.text.x = element_text(size = 14, colour = "black"),
+        axis.text.y = element_text(size = 14, colour = "black", margin=margin(r=5)),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 13, colour = "black")) +
+  labs(title = "Cell count across 9 fields of view (96-well plate)", x = "Columns", y = "Rows", fill = "Cell Count") +
+  facet_grid(rows=vars(Metadata_Plate))
+
+cellcount_hm
+```
+
+#Features
+```{r}
+test_chem_well <- fread(
+  file.path(pipeline_output_path, "test_chem_well.csv")
+)
+
+test_chem_well <- as.data.frame(test_chem_well)
+variances <- apply(test_chem_well, 2, var)
+variances[1:7] <- 1
+
+test_chem_well <- test_chem_well[, variances != 0 & !is.na(variances)]
+
+feature_cols  <- test_chem_well[, 5:ncol(test_chem_well)]
+  
+features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
+  mutate(
+    module   = str_extract(feature, "^[^_]+"),
+    specific = str_extract(feature, "(?<=_)[^_]+"),
+
+    channel1 = case_when(
+      module == "Correlation" ~
+        str_match(
+          feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 2],
+      TRUE ~ str_extract(feature, "(?<=_)(AGP|ER|DNA|Mito|RNA)(?=_)")
+    ),
+
+    channel2 = case_when(
+      module == "Correlation" ~
+        str_match(
+          feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"  #for correlation there are 2 channels
+        )[, 3],
+      TRUE ~ NA_character_
+    ),
+ specific = case_when(
+  module == "Granularity" ~ "Granularity",
+  TRUE ~ str_extract(feature, "(?<=_)[^_]+")  #no specifics in granulairy 
+),
+    region = str_extract(feature, "[^_]+$")
+  ) %>%
+  mutate(
+    region = ifelse(
+      region %in% c("cells", "cytoplasm", "nuclei"),
+      region,
+      NA_character_
+    )
+  )
+
+# Morphology / shape features
+features$specific[features$specific %in% c("BoundingBoxArea","EquivalentDiameter","MajorAxisLength","MinorAxisLength","MaxFeretDiameter","MinFeretDiameter","MaximumRadius","MeanRadius","MedianRadius","Perimeter","Compactness","Eccentricity","Extent","FormFactor","Solidity","Orientation", "Area")] <- "Morphology"
+
+
+# Spatial / neighborhood organization
+features$specific[features$specific %in% c("AngleBetweenNeighbors","FirstClosestDistance","FirstClosestObjectNumber","PercentTouching","SecondClosestDistance","SecondClosestObjectNumber")] <- "Spatial"
+
+# Subcellular organization / texture-like features
+features$specific[features$specific %in% c("FracAtD", "RadialCV", "MeanFrac")] <- "SubcellularOrganization"
+
+# Positional metadata
+features$specific[features$specific %in% c( "BoundingBoxMaximum","BoundingBoxMinimum","Center")] <- "Position"
+
+#Add category number i have 77
+features <- features %>%
+  group_by(region, specific, channel1, channel2, module) %>%
+  mutate(cat_group = cur_group_id()) %>%
+  mutate(ft_no = row_number()) %>%
+  ungroup()
+
+ft_colnames <- features %>%
+  dplyr::select(region, specific, channel1, channel2, module, cat_group, ft_no)
+
+#Concatenate region, channel, and module
+ft_colnames2 <- apply(
+  ft_colnames[, c("region", "specific", "channel1", "channel2", "module")],
+  1,
+  \(x) paste(na.omit(x), collapse = "_")
+)
+ft_colnames2 <- as.data.frame(ft_colnames2)
+colnames(ft_colnames2) <- "features"
+
+sample_info <- as.data.frame(colnames(test_chem_well[c(1:4)]))
+colnames(sample_info) <- "features"
+colnames(ft_colnames2) <- "features"
+
+fts <- rbind(sample_info, ft_colnames2)
+
+#Replace the original features names with the reformatted feature names
+colnames(test_chem_well) <- t(fts) # run code up to here for BMDExpress formatting
+
+#remove individual metadate collomns
+#i added plate
+test_chem_well$Chemical <- paste0(test_chem_well$Metadata_Chemical, "_",test_chem_well$Metadata_Concentration, "_", test_chem_well$Metadata_Well, "_",test_chem_well$Metadata_Plate)
+
+test_chem_well <- test_chem_well[, !names(test_chem_well) %in% c("Metadata_Plate", "Metadata_Well","Metadata_Concentration", "Metadata_Chemical")]
+
+##make chemicals info the row name
+rows <- test_chem_well$Chemical
+
+rownames(test_chem_well) <- rows
+
+test_chem_well <- test_chem_well %>%
+  dplyr::select(-Chemical)
+
+```
+

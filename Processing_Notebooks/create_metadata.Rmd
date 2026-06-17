@@ -1,0 +1,205 @@
+#Load libraries
+```{r}
+library(tidyverse)
+library(dplyr)
+library(readxl)
+```
+
+#Paths and info
+```{r}
+#change things here depedning on experiment 
+image_path <- "/Users/Kristin Eccles/SynologyDrive/U2-OS definitive experiment/U2OS rep4/raw images/"
+#Plate Map Info 
+cell_profiler_input_path <- "/Users/Kristin Eccles/SynologyDrive/U2-OS definitive experiment/U2OS rep4/Input/"
+  
+metadata_path <- "/Users/Kristin Eccles/SynologyDrive/U2-OS definitive experiment/U2OS rep4/metadata/"
+dir.create(metadata_path, recursive = TRUE, showWarnings = FALSE)
+
+#Create a folder path to find .csv files from cell profiler
+cell_profiler_process_path <- "/Users/Kristin Eccles/SynologyDrive/U2-OS definitive experiment/U2OS rep4/Output/"
+
+pipeline_output_path <- "../Output/rep4/"
+dir.create(pipeline_output_path, recursive = TRUE, showWarnings = FALSE)
+
+#Create experiment name (for labeling files)
+exp_name <- paste("rep4")
+ctrl_group <- "DMSO"
+
+```
+
+#to make the metadata.csv per plate feeds into cell profiler (clel profiler cannot handle more then 1 96 well plate at a time)
+```{r}
+## If plates gets fliped while treating in excel use =INDEX($P$12:$AA$19, 9-ROW(A1), 13-COLUMN(A1))
+plate_map_files <- list.files(
+  cell_profiler_input_path,
+  full.names = TRUE
+)
+
+# Get all tif files recursively
+files <- list.files(
+  image_path,
+  pattern = "\\.tif$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+# Build metadata table
+df <- tibble(filepath = files) %>%
+  
+  mutate(
+    Plate = str_extract(filepath, "Plate\\s*\\d+"),
+    Plate = str_remove(Plate, "Plate\\s*")
+  ) %>%
+  
+  mutate(filename = basename(filepath)) %>%
+  
+  separate(
+    filename,
+    into = c("pos", "site", "rest"),
+    sep = "-",
+    extra = "merge",
+    fill = "right"
+  ) %>%
+  
+  mutate(
+    rest = str_remove(rest, "\\.tif$"),
+    row = as.integer(substr(pos, 1, 3)),
+    well_number = as.integer(substr(pos, 4, 6)),
+    Site = as.integer(site),
+    channel = as.integer(str_sub(rest, -1)),
+    Plate = str_extract(filepath, "(?<=Plate\\s)\\d+")
+  )
+
+# Convert to 96-well format
+df <- df %>%
+  mutate(
+    row_letter = LETTERS[row],
+    Well = paste0(row_letter, well_number)
+  )
+
+# Channel/stain mapping
+df <- df %>%
+  mutate(
+    stain = case_when(
+      channel == 1 ~ "DNA",
+      channel == 2 ~ "Mito",
+      channel == 3 ~ "AGP",
+      channel == 4 ~ "ER",
+      channel == 5 ~ "RNA",
+      TRUE ~ NA_character_
+    )
+  )
+
+
+#read 2nd sheet
+plate_maps <- lapply(plate_map_files, function(f) {
+  
+  # Extract plate number
+  Plate <- str_extract(basename(f), "\\d+")
+  
+  # Check number of sheets
+  sheets <- readxl::excel_sheets(f)
+  
+  # Use second sheet if it exists, otherwise first
+  sheet_to_read <- if(length(sheets) >= 2) sheets[2] else sheets[1]
+  
+  readxl::read_excel(f, sheet = sheet_to_read) %>%
+    mutate(
+      Plate = Plate,
+      across(where(is.character), ~ na_if(.x, "")),
+      Concentration = as.numeric(Concentration)
+    )})
+
+plate_map <- bind_rows(plate_maps)
+
+df_combined <- df %>%
+  left_join(
+    plate_map,
+    by = c("Well", "Plate")
+  )
+
+# Remove all-NA columns this is like random colomns
+df_combined <- df_combined %>%
+  dplyr::select(where(~ !all(is.na(.))))
+
+# Remove rows without valid stain this is like random ropws from colombus analysis
+df_combined <- df_combined %>%
+  filter(!is.na(stain))
+
+# Reshape for CellProfiler
+df_cp <- df_combined %>%
+  mutate(
+    FileName = basename(filepath),
+    PathName = dirname(filepath)
+  ) %>%
+  pivot_wider(
+    id_cols = c(
+      Plate,
+      Well,
+      Site,
+      Chemical,
+      Concentration
+    ),
+    names_from = stain,
+    values_from = c(FileName, PathName),
+    names_glue = "{.value}_{stain}"
+  ) %>%
+  rename_with(
+    ~ paste0("Metadata_", .),
+    c(Plate, Well, Site, Chemical, Concentration)
+  )
+
+# Set DMSO controls
+df_cp <- df_cp %>%
+  mutate(
+    Metadata_Chemical = ifelse(
+      Metadata_Concentration == 0,
+      "DMSO",
+      Metadata_Chemical
+    )
+  )
+
+# Clean column names
+df_cp <- df_cp %>%
+  rename_with(~ gsub(" ", "", .))
+
+# Convert list columns to character
+df_cp <- df_cp %>%
+  mutate(across(where(is.list), ~ sapply(., `[`, 1)))
+
+sapply(df_cp, class)
+
+# Write 1 csv per plate
+
+df_cp %>%
+  group_split(Metadata_Plate) %>%
+  walk(~{
+    plate_id <- unique(.x$Metadata_Plate)
+    
+    write_csv(.x, paste0(metadata_path, "/metadata_plate_", plate_id, ".csv"))
+  })
+
+```
+
+#Source code
+```{r}
+#### 1. Feature Normalization seems to work bests when i run this notebooks not render 
+rmarkdown::render("../Processing_Notebooks/1_HC_feature_normalization.Rmd")
+
+#### 2. Reformatting of feature names and grouping by category
+plots <- "../Plots/rep3/reformatting"
+dir.create(plots, recursive = TRUE, showWarnings = FALSE)
+rmarkdown::render("../Processing_Notebooks/2_Reformat_feature_names.rmd")
+write.csv(test_chem_well,file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv"), row.names = TRUE)
+
+#### 3. Global Mahalanobis distance calculation and BMC analysis
+plots <-"../Plots/rep3/Global"
+dir.create(plots, recursive = TRUE, showWarnings = FALSE)
+rmarkdown::render("../Processing_Notebooks/3_Global PCA and Mahalnobis distances.rmd")
+
+#### 4. Categorical Mahalanobis distance calculation and BMC analysis
+plots <- "../Plots/rep3/Catagorical"
+dir.create(plots, recursive = TRUE, showWarnings = FALSE)
+rmarkdown::render("../Processing_Notebooks/4_Category PCA and Mahalanobis distances.rmd")
+```
+

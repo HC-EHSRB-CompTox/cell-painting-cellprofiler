@@ -1,0 +1,244 @@
+# load libraries
+```{r}
+library(readxl)
+library(dplyr)
+library(stats)
+library(tidyverse)
+library(stringr)
+library(purrr)
+library(data.table)
+library(tictoc)
+library(vroom)
+library(data.table)
+library(fst)
+```
+
+
+
+#Load data
+```{r}
+# ── Broad pycytominer default blocklist (from default_blocklists.yaml) 
+blocks <- c(
+  paste0("Correlation_Manders_", c(
+    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
+    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
+    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
+    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
+    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
+  ), "_nuclei"),
+  paste0("Correlation_RWC_", c(
+    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
+    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
+    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
+    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
+    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
+  ), "_nuclei"),
+  paste0(
+    "Granularity_", rep(14:16, times = 5), "_",
+    rep(c("AGP","DNA","ER","Mito","RNA"), each = 3), "_nuclei"
+  )
+)
+extra_blocks <- c("Zernike", "Correlation", "Texture")
+
+build_drop_regex <- function(py_blocklist, extra_blocklist) {
+  exact      <- paste0("^(", paste(py_blocklist, collapse = "|"), ")$")
+  substr_pat <- paste(extra_blocklist, collapse = "|")
+  paste(exact, substr_pat, sep = "|")
+}
+drop_regex <- build_drop_regex(blocks, extra_blocks)
+
+# ── Read one compartment: filter columns BEFORE they enter RAM ─────────────────
+#   1. Peek at the header only (zero rows → negligible cost)
+#   2. Simulate suffix addition on the column names
+#   3. Drop any name that matches drop_regex
+#   4. Read only the surviving columns via col_select
+read_compartment <- function(path, suffix, key_cols, drop_regex) {
+
+  all_cols  <- names(vroom(path, n_max = 0, show_col_types = FALSE))
+  suffixed  <- if_else(all_cols %in% key_cols, all_cols, paste0(all_cols, suffix))
+  keep_mask <- !grepl(drop_regex, suffixed, perl = TRUE)
+  keep_orig <- all_cols[keep_mask]           # original names to select
+  keep_suf  <- suffixed[keep_mask]           # final names after suffix
+
+  df <- vroom(path, col_select = all_of(keep_orig), show_col_types = FALSE)
+
+  # Rename in one shot: original → suffixed (key cols unchanged, others get suffix)
+  setNames(df, keep_suf)
+}
+
+# ── Merge one plate ────────────────────────────────────────────────────────────
+merge_plate <- function(plate_dir, drop_regex) {
+
+  cells_path <- file.path(plate_dir, "Cells.csv")
+  if (!file.exists(cells_path)) {
+    message("Skipping empty folder: ", plate_dir)
+    return(NULL)
+  }
+
+  key_cols <- names(vroom(cells_path, n_max = 0, show_col_types = FALSE))[1:7]
+
+  # Helper: return NULL silently if file doesn't exist
+  try_read <- function(filename, suffix) {
+    path <- file.path(plate_dir, filename)
+    if (!file.exists(path)) {
+      message("  Skipping missing file: ", path)
+      return(NULL)
+    }
+    read_compartment(path, suffix, key_cols, drop_regex)
+  }
+
+  Cells     <- try_read("Cells.csv",     "_cells")
+  Cytoplasm <- try_read("Cytoplasm.csv", "_cytoplasm")
+  Nuclei    <- try_read("Nuclei.csv",    "_nuclei")
+
+  # Collect only non-NULL compartments
+  compartments <- Filter(Negate(is.null), list(Cells, Cytoplasm, Nuclei))
+
+  if (length(compartments) == 0) return(NULL)
+  if (length(compartments) == 1) return(compartments[[1]])
+
+  # Join whatever is present
+  join_keys <- Reduce(intersect, lapply(compartments, names))
+  Reduce(function(a, b) full_join(a, b, by = join_keys), compartments)
+}
+
+# ── Main entry point: one plate at a time, release memory between iterations ───
+merge_data <- function(cell_profiler_process_path, plates = NULL) {
+
+  if (is.null(plates)) {
+    plates <- list.dirs(cell_profiler_process_path,
+                        recursive = FALSE, full.names = FALSE)
+    plates <- plates[str_detect(plates, "^Plate")]
+  }
+
+  result <- vector("list", length(plates))
+
+  for (i in seq_along(plates)) {
+    plate_dir  <- file.path(cell_profiler_process_path, plates[[i]])
+    message("Reading: ", plate_dir)
+    result[[i]] <- merge_plate(plate_dir, drop_regex)
+    gc()                                   
+  }
+
+  bind_rows(result)
+}
+
+all_data <- merge_data(cell_profiler_process_path)
+
+##########something named slioghtly off
+all_data$Metadata_Chemical <- gsub("Staurosprine", "Staurosporine", all_data$Metadata_Chemical)
+
+
+#Eliminate wells with fewer than 50 valid objects
+df_50cells <- all_data %>%
+  group_by(Metadata_Plate, Metadata_Well) %>%
+  filter(n() >= 50) %>%
+  ungroup()
+
+
+#have to keep removing to retain memory
+rm(all_data)
+# Remove columns with all NA or all 0, except Metadata_ columns
+metadata_cols <- grepl("^Metadata_", names(df_50cells))
+
+keep <- metadata_cols | (
+  colSums(is.na(df_50cells)) < nrow(df_50cells) &
+  colSums(df_50cells == 0, na.rm = TRUE) < nrow(df_50cells)
+)
+
+df_50cells <- df_50cells[, keep]
+
+```
+#Feature Selection and Normalization
+```{r}
+test_chem <- df_50cells
+rm(df_50cells)
+##calculate ctrl(solvent) median and median absolute deviation (MAD) using all control cells across the plates
+ctrl_cells <- subset(test_chem,  Metadata_Chemical %in% ctrl_group)
+
+# Separate metadata and feature columns
+metadata_cols <- ctrl_cells[, 1:7]
+feature_cols  <- ctrl_cells[, 8:ncol(ctrl_cells)]
+
+# ctrl median
+ctrl_med <- as.data.frame(t(apply(feature_cols, 2, function(x) median(x, na.rm = TRUE))))
+ctrl_med <- ctrl_med[rep(1, nrow(test_chem)), ]
+
+# ctrl MAD
+ctrl_mad <- as.data.frame(t(apply(feature_cols, 2, function(x) mad(x, constant = 1, na.rm = TRUE))) * 1.4826)
+
+# Identify features with a MAD of 0
+ctrl_mad_zero <- ctrl_mad[, ctrl_mad[1, ] == 0 & !is.na(ctrl_mad[1, ])]
+
+if(ncol(ctrl_mad_zero)>0){
+  ctrl_mad_zero <- ctrl_mad_zero[rep(1, nrow(test_chem)), ]
+  col_mad_zero <- colnames(ctrl_mad_zero)
+}
+
+##Features with non-zero MAD
+ctrl_mad <- ctrl_mad[, ctrl_mad[1,]!=0 & !is.na(ctrl_mad[1, ])]
+ctrl_mad <- ctrl_mad[rep(1, nrow(test_chem)), ]
+col_mad <- colnames(ctrl_mad)
+
+
+#Normalize all cell-level data to ctrl SD, median, and MAD
+print("Calculating standard deviation, median, and median absolute deviation (MAD) of all ctrl cells across the plates")
+
+test_chem_cc <- test_chem %>%
+  group_by(Metadata_Well, Metadata_Chemical,Metadata_Concentration, Metadata_Plate) %>%
+  mutate(cell_count = n()) %>%
+  ungroup()
+
+##Normalize features in test samples
+print(paste0("Normalizing cell-level data to ctrl median and MAD"))
+
+test_chem[, col_mad] <- (test_chem[,col_mad] - ctrl_med[,col_mad])/ctrl_mad[,col_mad]
+
+if(ncol(ctrl_mad_zero)>0){
+  test_chem[, col_mad_zero] <- (test_chem[, col_mad_zero] - ctrl_med[, col_mad_zero])
+  }else{
+  rm(ctrl_mad_zero)
+  }
+
+rm(ctrl_med, ctrl_mad, ctrl_mad_zero)
+```
+
+#Data Aggregation by Well
+```{r}
+print("Aggregating cell-level data to well-level")
+
+#Calculate the median of all treated wells
+#i remove imgae/cell data
+test_chem_well <- test_chem %>%
+  dplyr::select(-ObjectNumber, -ImageNumber, -Metadata_Site) %>%
+  group_by(Metadata_Well, Metadata_Chemical,
+           Metadata_Concentration, Metadata_Plate) %>%
+  summarize_all(median, na.rm = TRUE) %>%
+  ungroup()
+
+#z-standardization: Scale well- and treatment-level data to SD of ctrl
+print("Scaling well-level data to SD of vehicle control")
+
+feature_cols  <- names(test_chem_well)[5:ncol(test_chem_well)]
+# Compute SD from control wells
+ctrl_SD_w <- test_chem_well %>%
+  filter(Metadata_Chemical == ctrl_group) %>%
+  summarise(across(all_of(feature_cols), ~ sd(.x, na.rm = TRUE))) %>%
+  unlist()
+
+
+# Scale feature columns
+test_chem_well <- test_chem_well %>%
+  mutate(across(all_of(feature_cols), ~ .x / ctrl_SD_w[[cur_column()]]))
+
+print("Saving well-level data as .csv files")
+
+#write_csv(test_chem, file.path(pipeline_output_path, "test_chem.csv"))
+
+write_csv(test_chem_cc, file.path(pipeline_output_path, "test_chem_cc.csv"))
+
+write_csv(test_chem_well, file.path(pipeline_output_path,"test_chem_well.csv"))
+
+```
+
+
