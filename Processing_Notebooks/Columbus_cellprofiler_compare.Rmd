@@ -9,8 +9,8 @@ library(ggplot2)
 cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult.csv")
 cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult.csv")
 #cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
-#cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
-cp <- rbind(cp_rep1, cp_rep2)
+cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp <- rbind(cp_rep1, cp_rep2,cp_rep4)
 columbus <- read.csv("../Input/All exp BMC.csv")
 nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
 ```
@@ -164,15 +164,15 @@ ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
 ```{r}
 cp_rep1 <- read.csv("../Output/rep1/rep1_DMSO_Category Mahalanobis - tcplResult.csv")
 cp_rep2 <- read.csv("../Output/rep2/rep2_DMSO_Category Mahalanobis - tcplResult.csv")
-#cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
-#cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
-cp <- rbind(cp_rep1, cp_rep2)
+#cp_rep3 <- read.csv("../Output/rep3/")
+cp_rep4 <- read.csv("../Output/rep4/rep4_DMSO_Category Mahalanobis - tcplResult.csv")
+cp <- rbind(cp_rep1, cp_rep2, cp_rep4)
 
-columbus <- read.csv("../Input/Rep1_Category Mahalanobis - tcplResult.csv")
-#columbus_rep2 <- read.csv("../Input/Rep2_Category Mahalanobis - tcplResult.csv")
-#columbus_rep3 <- read.csv("../Input/Rep3_Category Mahalanobis - tcplResult.csv")
-#columbus_rep4 <- read.csv("../Input/Rep4_Category Mahalanobis - tcplResult.csv")
-#columbus <- rbind(columbus_rep1, columbus_rep2, columbus_rep3, columbus_rep4)
+columbus_rep1 <- read.csv("../Input/Rep1_Category Mahalanobis - tcplResult.csv")
+columbus_rep2 <- read.csv("../Input/Rep2_Category Mahalanobis - tcplResult.csv")
+columbus_rep3 <- read.csv("../Input/Rep3_Category Mahalanobis - tcplResult.csv")
+columbus_rep4 <- read.csv("../Input/Rep4_Category Mahalanobis - tcplResult.csv")
+columbus <- rbind(columbus_rep1, columbus_rep2, columbus_rep3, columbus_rep4)
 ```
 
 #Mutate and plotr

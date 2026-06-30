@@ -236,36 +236,20 @@ features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
       # Fallback
       TRUE ~ str_extract(feature, "(?<=_)[^_]+")
     ),
+  ) 
 
-    # ── Broad biological category ────────────────────────────────────────────
-    bio_category = case_when(
-      module == "AreaShape"          ~ "Morphology",
-      module == "Intensity"          ~ "Intensity",
-      module == "Texture"            ~ "Texture",
-      module == "Granularity"        ~ "Granularity",
-      module == "RadialDistribution" ~ "SubcellularOrganization",
-      module == "Correlation"        ~ "Colocalization",
-      module == "Neighbors"          ~ "Spatial",
-      module == "Location"           ~ "Position",
-      TRUE                           ~ "Other"
-    )
-  ) %>%
-  
-  # ── Grouping and numbering ─────────────────────────────────────────────────
-  group_by(region, module, bio_category, specific, channel1, channel2) %>%
-  mutate(
-    cat_group = cur_group_id(),
-    ft_no     = row_number()
-  ) %>%
+features <- features %>%
+  group_by(region, specific, channel1, channel2, module) %>%
+  mutate(cat_group = cur_group_id()) %>%
+  mutate(ft_no = row_number()) %>%
   ungroup()
 
-
 ft_colnames <- features %>%
-  dplyr::select(region, module, bio_category, specific, channel1, channel2, cat_group, ft_no)
+  dplyr::select(region, specific, channel1, channel2, module, cat_group, ft_no)
 
 #Concatenate region, channel, and module
 ft_colnames2 <- apply(
-  ft_colnames[, c("region", "module", "bio_category", "specific", "channel1", "channel2", "cat_group", "ft_no")],
+  ft_colnames[, c("region", "specific", "channel1", "channel2", "module")],
   1,
   \(x) paste(na.omit(x), collapse = "_")
 )
@@ -294,6 +278,5 @@ rownames(test_chem_well) <- rows
 
 test_chem_well <- test_chem_well %>%
   dplyr::select(-Chemical)
-
 ```
 
