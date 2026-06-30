@@ -161,6 +161,20 @@ lapply(chem_list, function(x){
 
 #Tcplfit2
 ```{r}
+
+#Concentration-response modeling of each category
+mahal_dist_chem <- as.data.frame(mahal_dist_chem)
+
+test_chem_res <- mahal_dist_chem %>%
+  filter(chem != ctrl_group)
+
+###########################################################################
+#Exclude wells with >50% reduction in relative cell count
+test_chem_res <- test_chem_res %>%
+  filter(!paste(chem, concentration) %in% paste(cytotoxic_conc$Metadata_Chemical, cytotoxic_conc$Metadata_Concentration))
+
+#####Tcplfit2 to derive benchmark concentrations#####
+
 #Function to model concentration-response using concRespCore function in tcplfit2
 conc_res_modeling <- function(test_chem, vehicle_ctrl){ 
   
@@ -177,11 +191,6 @@ conc_res_modeling <- function(test_chem, vehicle_ctrl){
 }
 
 
-#Concentration-response modeling of each category
-mahal_dist_chem <- as.data.frame(mahal_dist_chem)
-
-test_chem_res <- mahal_dist_chem %>%
-  filter(chem != ctrl_group)
 
 chem_list <- unique(test_chem_res$chem)
 
@@ -219,11 +228,30 @@ tcpl_results_cat <- cbind("chem"=split_col[,1], "feat"=split_col[,2], tcpl_resul
 
 ####BMC filtering criteria
 #Eliminate BMCs without ACC and BMCU/BMCL
-tcpl_results_cat <- tcpl_results_cat[!is.na(tcpl_results_cat$bmdu) & !is.na(tcpl_results_cat$acc) & !is.na(tcpl_results_cat$bmdl),]
 
-tcpl_results_cat <- tcpl_results_cat %>% filter(chem != "Sorbitol" & chem != "Staurosporine") %>% filter(hitcall>0.90)
+tcpl_results_cat <- tcpl_results_cat %>%
+  mutate(
+    minDose = min(conc, na.rm = TRUE),
+    maxDose = max(conc, na.rm = TRUE),
 
+    removal_reason = case_when(
+      hitcall < 0.9            ~ "low_hitcall",
+      is.na(bmdl)              ~ "missing_bmdl",
+      is.na(bmdu)              ~ "missing_bmdu",
+     # bmd < minDose            ~ "bmd_below_minDose",
+      #bmd > maxDose            ~ "bmd_above_maxDose",
+      TRUE                     ~ "kept"
+    ),
+
+    keep = removal_reason == "kept",
+
+    bmd  = ifelse(keep, bmd, NA),
+    bmdl = ifelse(keep, bmdl, NA),
+    bmdu = ifelse(keep, bmdu, NA)
+  ) %>%
+  ungroup()
 #Model error parameter cutoff
+
 tcpl_results_cat <- tcpl_results_cat %>%
   filter(er<0.99) 
 

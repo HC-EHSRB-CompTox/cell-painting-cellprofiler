@@ -17,7 +17,7 @@ library(fst)
 
 #Load data
 ```{r}
-# ── Broad pycytominer default blocklist (from default_blocklists.yaml) 
+# Feature immdieatly removed (based on pychitomter bloacklis)
 blocks <- c(
   paste0("Correlation_Manders_", c(
     "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
@@ -38,7 +38,7 @@ blocks <- c(
     rep(c("AGP","DNA","ER","Mito","RNA"), each = 3), "_nuclei"
   )
 )
-extra_blocks <- c("Zernike", "Correlation", "Texture")
+extra_blocks <- c("Zernike")
 
 build_drop_regex <- function(py_blocklist, extra_blocklist) {
   exact      <- paste0("^(", paste(py_blocklist, collapse = "|"), ")$")
@@ -47,37 +47,51 @@ build_drop_regex <- function(py_blocklist, extra_blocklist) {
 }
 drop_regex <- build_drop_regex(blocks, extra_blocks)
 
-# ── Read one compartment: filter columns BEFORE they enter RAM ─────────────────
-#   1. Peek at the header only (zero rows → negligible cost)
-#   2. Simulate suffix addition on the column names
-#   3. Drop any name that matches drop_regex
-#   4. Read only the surviving columns via col_select
+# ── Read one compartment ───────────────────────────────────────────────────────
 read_compartment <- function(path, suffix, key_cols, drop_regex) {
-
   all_cols  <- names(vroom(path, n_max = 0, show_col_types = FALSE))
   suffixed  <- if_else(all_cols %in% key_cols, all_cols, paste0(all_cols, suffix))
   keep_mask <- !grepl(drop_regex, suffixed, perl = TRUE)
-  keep_orig <- all_cols[keep_mask]           # original names to select
-  keep_suf  <- suffixed[keep_mask]           # final names after suffix
-
+  keep_orig <- all_cols[keep_mask]
+  keep_suf  <- suffixed[keep_mask]
   df <- vroom(path, col_select = all_of(keep_orig), show_col_types = FALSE)
-
-  # Rename in one shot: original → suffixed (key cols unchanged, others get suffix)
   setNames(df, keep_suf)
+}
+
+# ── Feature breakdown reporter ─────────────────────────────────────────────────
+report_plate_features <- function(merged_df, plate_name) {
+  all_cols <- names(merged_df)
+  
+  compartment_counts <- list(
+    nuclei    = sum(str_detect(all_cols, "_nuclei$")),
+    cytoplasm = sum(str_detect(all_cols, "_cytoplasm$")),
+    cells     = sum(str_detect(all_cols, "_cells$")),
+    key_cols  = sum(!str_detect(all_cols, "_(nuclei|cytoplasm|cells)$"))
+  )
+  
+  message(sprintf(
+    "\n── %s ──\n  nuclei: %d | cytoplasm: %d | cells: %d | key/other: %d | TOTAL cols: %d",
+    plate_name,
+    compartment_counts$nuclei,
+    compartment_counts$cytoplasm,
+    compartment_counts$cells,
+    compartment_counts$key_cols,
+    ncol(merged_df)
+  ))
+  
+  invisible(compartment_counts)
 }
 
 # ── Merge one plate ────────────────────────────────────────────────────────────
 merge_plate <- function(plate_dir, drop_regex) {
-
   cells_path <- file.path(plate_dir, "Cells.csv")
   if (!file.exists(cells_path)) {
     message("Skipping empty folder: ", plate_dir)
     return(NULL)
   }
-
+  
   key_cols <- names(vroom(cells_path, n_max = 0, show_col_types = FALSE))[1:7]
-
-  # Helper: return NULL silently if file doesn't exist
+  
   try_read <- function(filename, suffix) {
     path <- file.path(plate_dir, filename)
     if (!file.exists(path)) {
@@ -86,69 +100,87 @@ merge_plate <- function(plate_dir, drop_regex) {
     }
     read_compartment(path, suffix, key_cols, drop_regex)
   }
-
+  
   Cells     <- try_read("Cells.csv",     "_cells")
   Cytoplasm <- try_read("Cytoplasm.csv", "_cytoplasm")
   Nuclei    <- try_read("Nuclei.csv",    "_nuclei")
-
-  # Collect only non-NULL compartments
+  
   compartments <- Filter(Negate(is.null), list(Cells, Cytoplasm, Nuclei))
-
   if (length(compartments) == 0) return(NULL)
-  if (length(compartments) == 1) return(compartments[[1]])
-
-  # Join whatever is present
-  join_keys <- Reduce(intersect, lapply(compartments, names))
-  Reduce(function(a, b) full_join(a, b, by = join_keys), compartments)
+  
+  merged <- if (length(compartments) == 1) {
+    compartments[[1]]
+  } else {
+    join_keys <- Reduce(intersect, lapply(compartments, names))
+    Reduce(function(a, b) full_join(a, b, by = join_keys), compartments)
+  }
+  
+  report_plate_features(merged, basename(plate_dir))
+  merged
 }
 
-# ── Main entry point: one plate at a time, release memory between iterations ───
+# ── Main entry point ───────────────────────────────────────────────────────────
 merge_data <- function(cell_profiler_process_path, plates = NULL) {
-
   if (is.null(plates)) {
     plates <- list.dirs(cell_profiler_process_path,
                         recursive = FALSE, full.names = FALSE)
     plates <- plates[str_detect(plates, "^Plate")]
   }
-
+  
   result <- vector("list", length(plates))
-
   for (i in seq_along(plates)) {
     plate_dir  <- file.path(cell_profiler_process_path, plates[[i]])
     message("Reading: ", plate_dir)
     result[[i]] <- merge_plate(plate_dir, drop_regex)
-    gc()                                   
+    gc()
   }
-
-  bind_rows(result)
+  
+  combined <- bind_rows(result)
+  
+  message("\n══ COMBINED DATASET ══")
+  report_plate_features(combined, "ALL PLATES")
+  message(sprintf("  rows: %d | plates loaded: %d",
+                  nrow(combined), sum(!sapply(result, is.null))))
+  
+  combined
 }
 
+# ── Run ────────────────────────────────────────────────────────────────────────
 all_data <- merge_data(cell_profiler_process_path)
 
-##########something named slioghtly off
 all_data$Metadata_Chemical <- gsub("Staurosprine", "Staurosporine", all_data$Metadata_Chemical)
 
-
-#Eliminate wells with fewer than 50 valid objects
+# Eliminate wells with fewer than 50 valid objects
 df_50cells <- all_data %>%
   group_by(Metadata_Plate, Metadata_Well) %>%
   filter(n() >= 50) %>%
   ungroup()
 
-
-#have to keep removing to retain memory
 rm(all_data)
-# Remove columns with all NA or all 0, except Metadata_ columns
+
+# Remove columns that are all NA or all 0 (keeping Metadata_ columns)
 metadata_cols <- grepl("^Metadata_", names(df_50cells))
 
 keep <- metadata_cols | (
   colSums(is.na(df_50cells)) < nrow(df_50cells) &
   colSums(df_50cells == 0, na.rm = TRUE) < nrow(df_50cells)
+
 )
 
 df_50cells <- df_50cells[, keep]
 
+# ── Variance filter  variance filter before normalization. Near-zero variance 
+feat_cols <- names(df_50cells)[!grepl("^Metadata_", names(df_50cells))]
+feat_vars <- apply(df_50cells[, feat_cols], 2, var, na.rm = TRUE)
+df_50cells <- df_50cells[, c(
+  names(df_50cells)[grepl("^Metadata_", names(df_50cells))],
+  feat_cols[feat_vars > 1e-6]
+)]
+
 ```
+
+
+
 #Feature Selection and Normalization
 ```{r}
 test_chem <- df_50cells
@@ -227,9 +259,17 @@ ctrl_SD_w <- test_chem_well %>%
   unlist()
 
 
-# Scale feature columns
 test_chem_well <- test_chem_well %>%
   mutate(across(all_of(feature_cols), ~ .x / ctrl_SD_w[[cur_column()]]))
+
+# ── Correlation filter ─────────────────────────────────────────────────────────
+feat_cols   <- names(test_chem_well)[!grepl("^Metadata_", names(test_chem_well))]
+cor_mat     <- cor(test_chem_well[, feat_cols], use = "pairwise.complete.obs")
+redundant   <- findCorrelation(cor_mat, cutoff = 0.9, exact = TRUE)
+if (length(redundant) > 0) {
+  message(sprintf("Dropping %d correlated features", length(redundant)))
+  test_chem_well <- test_chem_well[, -which(names(test_chem_well) %in% feat_cols[redundant])]
+}
 
 print("Saving well-level data as .csv files")
 

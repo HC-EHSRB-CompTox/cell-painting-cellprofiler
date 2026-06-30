@@ -8,9 +8,9 @@ library(ggplot2)
 ```{r}
 cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult.csv")
 cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
-cp <- rbind(cp_rep1, cp_rep2, cp_rep3, cp_rep4)
+#cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
+#cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp <- rbind(cp_rep1, cp_rep2)
 columbus <- read.csv("../Input/All exp BMC.csv")
 nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
 ```
@@ -157,4 +157,130 @@ ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
 ```
+
+#Categorical
+
+#Load data
+```{r}
+cp_rep1 <- read.csv("../Output/rep1/rep1_DMSO_Category Mahalanobis - tcplResult.csv")
+cp_rep2 <- read.csv("../Output/rep2/rep2_DMSO_Category Mahalanobis - tcplResult.csv")
+#cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
+#cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp <- rbind(cp_rep1, cp_rep2)
+
+columbus <- read.csv("../Input/Rep1_Category Mahalanobis - tcplResult.csv")
+#columbus_rep2 <- read.csv("../Input/Rep2_Category Mahalanobis - tcplResult.csv")
+#columbus_rep3 <- read.csv("../Input/Rep3_Category Mahalanobis - tcplResult.csv")
+#columbus_rep4 <- read.csv("../Input/Rep4_Category Mahalanobis - tcplResult.csv")
+#columbus <- rbind(columbus_rep1, columbus_rep2, columbus_rep3, columbus_rep4)
+```
+
+#Mutate and plotr
+```{r}
+#only keep needed colomns so rbind works
+columbus <- columbus %>%
+  dplyr::filter(exp %in% c("Definitive_rep1",
+                           "Definitive_rep2",
+                           "Definitive_rep3",
+                           "Definitive_rep4")) %>%
+  dplyr::select(any_of(c("bmd", "chem", "bmdl", "bmdu", "exp", "feat"))) %>%
+  mutate(source = "Columbus")
+
+columbus <- columbus %>%
+  # rename exp IDs to reps
+  dplyr::mutate(
+    exp = dplyr::case_when(
+      exp %in% c("Definitive_rep1") ~ "rep1",
+      exp %in% c("Definitive_rep2") ~ "rep2",
+      exp %in% c("Definitive_rep3") ~ "rep3",
+      exp %in% c("Definitive_rep4") ~ "rep4",
+      TRUE ~ exp
+    )
+  )
+
+columbus <- columbus %>%
+  filter(!str_starts(feat, "Ring_")) %>%
+  filter(!str_starts(feat, "Membrane")) %>%
+  mutate(
+    feat = str_replace_all(
+      feat,
+      c(
+        "Cell_" = "cells_",
+        "Nucleus_" = "nuclei_",
+        "Nuclei" = "nuclei_",
+        "Cytoplasm_" = "cytoplasm_"
+      )
+    )
+  )
+
+cp <- cp %>%
+  dplyr::select(any_of(c("bmd", "chem", "bmdl", "bmdu", "exp", "feat"))) %>%
+  mutate(source = "CP") %>%
+  mutate(
+    chem = ifelse(chem == "Taxol", "Taxol (Paclitaxel)", chem),
+    chem = ifelse(chem == "Berberine chloride", "Berberine Chloride", chem)) %>%
+         filter(!is.na(bmd))
+
+
+cp_to_columbus <- c(
+  # Radial distribution
+  "nuclei_SubcellularOrganization_DNA_RadialDistribution" = "nuclei_DNA_Radial",
+  "nuclei_SubcellularOrganization_RNA_RadialDistribution" = "nuclei_RNA_Radial",
+ 
+  # Texture / Granularity
+  "cytoplasm_Granularity_AGP_Granularity"  = "cytoplasm_AGP_Texture",
+  "cytoplasm_Granularity_ER_Granularity"   = "cytoplasm_ER_Texture",
+  "cytoplasm_Granularity_Mito_Granularity" = "cytoplasm_Mito_Texture",
+ 
+  # Intensity / MaxIntensity
+  "cytoplasm_MaxIntensity_AGP_Location"  = "cytoplasm_AGP_Intensity",
+  "cytoplasm_MaxIntensity_ER_Location"   = "cytoplasm_ER_Intensity",
+  "cytoplasm_MaxIntensity_Mito_Location" = "cytoplasm_Mito_Intensity",
+ 
+  # Morphology
+  "nuclei_Morphology_AreaShape" = "nuclei__Shape_Morph",
+  "cells_Morphology_AreaShape"  = "cells_AGP_Compactness",
+ 
+  # Position
+  "cells_Position_AreaShape"  = "cells_position_position",
+  "nuclei_Position_AreaShape" = "nuclei_position_position"
+)
+ 
+cp <- cp %>%
+  mutate(feat = ifelse(source == "CP" & feat %in% names(cp_to_columbus),
+                       cp_to_columbus[feat],
+                       feat))
+
+joined <- rbind(columbus, cp) %>%
+  group_by(chem) %>%
+  ungroup()
+
+write.csv(joined, "../Output/joined_cat.csv")
+
+shape_list <- c("median" = 15, "rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+for (chem_i in unique(joined$chem)) {
+
+  p <- joined %>%
+    filter(chem == chem_i) %>%
+    ggplot(aes(x = bmd, y = feat, colour = source, shape = exp)) +
+    geom_point(size = 2) +
+    geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+    scale_x_log10() +
+    scale_shape_manual(name = "exp", values = shape_list) +
+    theme_bw() +
+    labs(title = chem_i) +
+    theme(
+      legend.position = "right",
+      axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+      axis.title.y = element_text(size = 13),
+      axis.text.x = element_text(size = 10, colour = "black"),
+      axis.text.y = element_text(size = 6, colour = "black",
+                                 margin = margin(r = 5)),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+    )
+
+  print(p)
+}
+```
+
 

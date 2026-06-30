@@ -136,69 +136,136 @@ variances[1:7] <- 1
 test_chem_well <- test_chem_well[, variances != 0 & !is.na(variances)]
 
 feature_cols  <- test_chem_well[, 5:ncol(test_chem_well)]
-  
+
 features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
   mutate(
-    module   = str_extract(feature, "^[^_]+"),
-    specific = str_extract(feature, "(?<=_)[^_]+"),
-
+    # ── Core structural parsing ──────────────────────────────────────────────
+    module  = str_extract(feature, "^[^_]+"),
+    region  = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
+    
+    # ── Channel extraction ───────────────────────────────────────────────────
+    # Correlation has two channels; everything else has at most one
     channel1 = case_when(
       module == "Correlation" ~
-        str_match(
-          feature,
+        str_match(feature,
           "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
         )[, 2],
-      TRUE ~ str_extract(feature, "(?<=_)(AGP|ER|DNA|Mito|RNA)(?=_)")
+      TRUE ~ str_extract(feature, "_(AGP|ER|DNA|Mito|RNA)(_|$)") %>%
+               str_remove_all("_")
     ),
-
     channel2 = case_when(
       module == "Correlation" ~
-        str_match(
-          feature,
-          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"  #for correlation there are 2 channels
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
         )[, 3],
       TRUE ~ NA_character_
     ),
- specific = case_when(
-  module == "Granularity" ~ "Granularity",
-  TRUE ~ str_extract(feature, "(?<=_)[^_]+")  #no specifics in granulairy 
-),
-    region = str_extract(feature, "[^_]+$")
-  ) %>%
-  mutate(
-    region = ifelse(
-      region %in% c("cells", "cytoplasm", "nuclei"),
-      region,
-      NA_character_
+    
+    # ── Specific measurement label ───────────────────────────────────────────
+    specific = case_when(
+      
+      # Granularity: no meaningful sub-type, label by scale
+      module == "Granularity" ~ "Granularity",
+      
+      # AreaShape: split into Size vs Shape 
+      str_detect(feature, paste(c(
+        "Area","BoundingBoxArea","EquivalentDiameter",
+        "MajorAxisLength","MinorAxisLength",
+        "MaxFeretDiameter","MinFeretDiameter",
+        "MaximumRadius","MeanRadius","MedianRadius","Perimeter"
+      ), collapse = "|")) ~ "Size",
+      str_detect(feature, paste(c(
+        "Compactness","Eccentricity","Extent",
+        "FormFactor","Solidity","Orientation","EulerNumber"
+      ), collapse = "|")) ~ "Shape",
+
+      # Intensity subtypes
+      str_detect(feature, "IntegratedIntensity") ~ "IntegratedIntensity",
+      str_detect(feature, "MeanIntensity")        ~ "MeanIntensity",
+      str_detect(feature, "MaxIntensity")         ~ "MaxIntensity",
+      str_detect(feature, "MinIntensity")         ~ "MinIntensity",
+      str_detect(feature, "StdIntensity")         ~ "StdIntensity",
+      str_detect(feature, "MedianIntensity")      ~ "MedianIntensity",
+      str_detect(feature, "MADIntensity")         ~ "MADIntensity",
+      str_detect(feature, "UpperQuartileIntensity") ~ "UpperQuartileIntensity",
+      str_detect(feature, "LowerQuartileIntensity") ~ "LowerQuartileIntensity",
+      str_detect(feature, "MassDisplacement")     ~ "MassDisplacement",
+
+      # Texture subtypes
+      str_detect(feature, "Gabor")                ~ "Gabor",
+      str_detect(feature, "AngularSecondMoment")  ~ "AngularSecondMoment",
+      str_detect(feature, "InverseDifferenceMoment") ~ "InverseDifferenceMoment",
+      str_detect(feature, "SumAverage")           ~ "SumAverage",
+      str_detect(feature, "SumEntropy")           ~ "SumEntropy",
+      str_detect(feature, "SumVariance")          ~ "SumVariance",
+      str_detect(feature, "DifferenceEntropy")    ~ "DifferenceEntropy",
+      str_detect(feature, "DifferenceVariance")   ~ "DifferenceVariance",
+      str_detect(feature, "InfoMeas1")            ~ "InfoMeas1",
+      str_detect(feature, "InfoMeas2")            ~ "InfoMeas2",
+      str_detect(feature, "Texture_Entropy")      ~ "Entropy",
+      str_detect(feature, "Texture_Variance")     ~ "Variance",
+      str_detect(feature, "Texture_Contrast")     ~ "Contrast",
+      str_detect(feature, "Texture_Correlation")  ~ "TextureCorrelation",
+
+      # Radial distribution subtypes
+      str_detect(feature, "FracAtD")   ~ "FractionAtDistance",
+      str_detect(feature, "MeanFrac")  ~ "MeanFraction",
+      str_detect(feature, "RadialCV")  ~ "RadialCV",
+
+      # Colocalization subtypes (within Correlation module)
+      str_detect(feature, "Correlation_Costes")     ~ "Costes",
+      str_detect(feature, "Correlation_K_")         ~ "KCoefficient",
+      str_detect(feature, "Correlation_Manders")    ~ "Manders",
+      str_detect(feature, "Correlation_Overlap")    ~ "Overlap",
+      str_detect(feature, "Correlation_RWC")        ~ "RWC",
+      str_detect(feature, "Correlation_Correlation") ~ "PearsonCorrelation",
+
+      # Spatial / neighbors
+      str_detect(feature, "AngleBetween")       ~ "Spatial",
+      str_detect(feature, "FirstClosest")        ~ "Spatial",
+      str_detect(feature, "SecondClosest")       ~ "Spatial",
+      str_detect(feature, "NumberOfNeighbors")   ~ "Spatial",
+      str_detect(feature, "PercentTouching")     ~ "Spatial",
+
+      # Position / location metadata
+      str_detect(feature, "CenterMassIntensity") ~ "Position",
+      str_detect(feature, "MaxIntensity_[XY]")   ~ "Position",
+      str_detect(feature, "Center_[XY]")         ~ "Position",
+      str_detect(feature, "BoundingBox")         ~ "Position",
+
+      # Fallback
+      TRUE ~ str_extract(feature, "(?<=_)[^_]+")
+    ),
+
+    # ── Broad biological category ────────────────────────────────────────────
+    bio_category = case_when(
+      module == "AreaShape"          ~ "Morphology",
+      module == "Intensity"          ~ "Intensity",
+      module == "Texture"            ~ "Texture",
+      module == "Granularity"        ~ "Granularity",
+      module == "RadialDistribution" ~ "SubcellularOrganization",
+      module == "Correlation"        ~ "Colocalization",
+      module == "Neighbors"          ~ "Spatial",
+      module == "Location"           ~ "Position",
+      TRUE                           ~ "Other"
     )
-  )
-
-# Morphology / shape features
-features$specific[features$specific %in% c("BoundingBoxArea","EquivalentDiameter","MajorAxisLength","MinorAxisLength","MaxFeretDiameter","MinFeretDiameter","MaximumRadius","MeanRadius","MedianRadius","Perimeter","Compactness","Eccentricity","Extent","FormFactor","Solidity","Orientation", "Area")] <- "Morphology"
-
-
-# Spatial / neighborhood organization
-features$specific[features$specific %in% c("AngleBetweenNeighbors","FirstClosestDistance","FirstClosestObjectNumber","PercentTouching","SecondClosestDistance","SecondClosestObjectNumber")] <- "Spatial"
-
-# Subcellular organization / texture-like features
-features$specific[features$specific %in% c("FracAtD", "RadialCV", "MeanFrac")] <- "SubcellularOrganization"
-
-# Positional metadata
-features$specific[features$specific %in% c( "BoundingBoxMaximum","BoundingBoxMinimum","Center")] <- "Position"
-
-#Add category number i have 77
-features <- features %>%
-  group_by(region, specific, channel1, channel2, module) %>%
-  mutate(cat_group = cur_group_id()) %>%
-  mutate(ft_no = row_number()) %>%
+  ) %>%
+  
+  # ── Grouping and numbering ─────────────────────────────────────────────────
+  group_by(region, module, bio_category, specific, channel1, channel2) %>%
+  mutate(
+    cat_group = cur_group_id(),
+    ft_no     = row_number()
+  ) %>%
   ungroup()
 
+
 ft_colnames <- features %>%
-  dplyr::select(region, specific, channel1, channel2, module, cat_group, ft_no)
+  dplyr::select(region, module, bio_category, specific, channel1, channel2, cat_group, ft_no)
 
 #Concatenate region, channel, and module
 ft_colnames2 <- apply(
-  ft_colnames[, c("region", "specific", "channel1", "channel2", "module")],
+  ft_colnames[, c("region", "module", "bio_category", "specific", "channel1", "channel2", "cat_group", "ft_no")],
   1,
   \(x) paste(na.omit(x), collapse = "_")
 )

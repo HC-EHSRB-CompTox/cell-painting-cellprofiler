@@ -73,8 +73,8 @@ mahal_dist <- mahalanobis(dat, ctrl_mean, solved_cov, inverted = T)
 
 mahal_dist <- as.data.frame(mahal_dist)
 
-#mahal_dist_sq <- sqrt(mahal_dist)
-#mahal_dist <- mahal_dist_sq
+mahal_dist_sq <- sqrt(mahal_dist)
+mahal_dist <- mahal_dist_sq
 
 mahal_dist <- cbind(chem = rownames(well_data), mahal_dist)
 

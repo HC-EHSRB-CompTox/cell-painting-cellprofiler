@@ -187,18 +187,18 @@ df_cp %>%
 rmarkdown::render("../Processing_Notebooks/1_HC_feature_normalization.Rmd")
 
 #### 2. Reformatting of feature names and grouping by category
-plots <- "../Plots/rep3/reformatting"
+plots <- "../Plots/rep1/reformatting"
 dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/2_Reformat_feature_names.rmd")
 write.csv(test_chem_well,file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv"), row.names = TRUE)
 
 #### 3. Global Mahalanobis distance calculation and BMC analysis
-plots <-"../Plots/rep3/Global"
+plots <-"../Plots/rep1/Global"
 dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/3_Global PCA and Mahalnobis distances.rmd")
 
 #### 4. Categorical Mahalanobis distance calculation and BMC analysis
-plots <- "../Plots/rep3/Catagorical"
+plots <- "../Plots/rep1/Catagorical"
 dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/4_Category PCA and Mahalanobis distances.rmd")
 ```
