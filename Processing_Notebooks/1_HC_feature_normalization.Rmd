@@ -11,6 +11,7 @@ library(tictoc)
 library(vroom)
 library(data.table)
 library(fst)
+library(caret)
 ```
 
 
@@ -168,15 +169,6 @@ keep <- metadata_cols | (
 )
 
 df_50cells <- df_50cells[, keep]
-
-# ── Variance filter  variance filter before normalization. Near-zero variance 
-feat_cols <- names(df_50cells)[!grepl("^Metadata_", names(df_50cells))]
-feat_vars <- apply(df_50cells[, feat_cols], 2, var, na.rm = TRUE)
-df_50cells <- df_50cells[, c(
-  names(df_50cells)[grepl("^Metadata_", names(df_50cells))],
-  feat_cols[feat_vars > 1e-6]
-)]
-
 ```
 
 
@@ -261,15 +253,6 @@ ctrl_SD_w <- test_chem_well %>%
 
 test_chem_well <- test_chem_well %>%
   mutate(across(all_of(feature_cols), ~ .x / ctrl_SD_w[[cur_column()]]))
-
-# ── Correlation filter ─────────────────────────────────────────────────────────
-feat_cols   <- names(test_chem_well)[!grepl("^Metadata_", names(test_chem_well))]
-cor_mat     <- cor(test_chem_well[, feat_cols], use = "pairwise.complete.obs")
-redundant   <- findCorrelation(cor_mat, cutoff = 0.9, exact = TRUE)
-if (length(redundant) > 0) {
-  message(sprintf("Dropping %d correlated features", length(redundant)))
-  test_chem_well <- test_chem_well[, -which(names(test_chem_well) %in% feat_cols[redundant])]
-}
 
 print("Saving well-level data as .csv files")
 
