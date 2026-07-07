@@ -258,7 +258,10 @@ print("Saving well-level data as .csv files")
 
 #write_csv(test_chem, file.path(pipeline_output_path, "test_chem.csv"))
 
-write_csv(test_chem_cc, file.path(pipeline_output_path, "test_chem_cc.csv"))
+saveRDS(
+  test_chem_cc,
+  file = file.path(pipeline_output_path, "test_chem_cc.rds")
+)
 
 write_csv(test_chem_well, file.path(pipeline_output_path,"test_chem_well.csv"))
 

@@ -9,8 +9,8 @@ library(tidyverse)
 ```
 #Categorize features
 ```{r}
-test_chem_cc <- fread(
-  file.path(pipeline_output_path, "test_chem_cc.csv")
+test_chem_cc <- readRDS(
+  file.path(pipeline_output_path, "test_chem_cc.rds")
 )
 cell_count <- as.data.frame(test_chem_cc)
 
