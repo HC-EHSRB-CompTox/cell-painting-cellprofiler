@@ -1,0 +1,169 @@
+#Load libraries
+```{r}
+library(tidyverse)
+library(ggplot2)
+```
+#Sqt Mal compare
+##Load data
+```{r}
+# sqrt
+cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep1$rep <- "rep1"
+cp_rep1$is_sqrt <- TRUE
+
+cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep2$rep <- "rep2"
+cp_rep2$is_sqrt <- TRUE
+
+cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep3$rep <- "rep3"
+cp_rep3$is_sqrt <- TRUE
+
+cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep4$rep <- "rep4"
+cp_rep4$is_sqrt <- TRUE
+
+
+# No sqrt
+cp_rep1_nosqrt <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep1_nosqrt$rep <- "rep1"
+cp_rep1_nosqrt$is_sqrt <- FALSE
+
+cp_rep2_nosqrt <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep2_nosqrt$rep <- "rep2"
+cp_rep2_nosqrt$is_sqrt <- FALSE
+
+cp_rep3_nosqrt <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep3_nosqrt$rep <- "rep3"
+cp_rep3_nosqrt$is_sqrt <- FALSE
+
+cp_rep4_nosqrt <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep4_nosqrt$rep <- "rep4"
+cp_rep4_nosqrt$is_sqrt <- FALSE
+
+
+# Combine all
+cp <- rbind(
+  cp_rep1, cp_rep2, cp_rep3, cp_rep4,
+  cp_rep1_nosqrt, 
+  cp_rep2_nosqrt,
+  cp_rep3_nosqrt, 
+  cp_rep4_nosqrt
+)
+```
+
+##Mutate and plotr
+```{r}
+cp <- cp %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "is_sqrt"))) %>%
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+ggsave("../Output/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
+```
+
+
+#New order compare
+##Load data
+```{r}
+# normal order from eunnara
+cp_rep1 <- read.csv("../Output/rep1/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep1$rep <- "rep1"
+cp_rep1$is_neworder <- FALSE
+
+cp_rep2 <- read.csv("../Output/rep2/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep2$rep <- "rep2"
+cp_rep2$is_neworder <- FALSE
+
+cp_rep3 <- read.csv("../Output/rep3/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep3$rep <- "rep3"
+cp_rep3$is_neworder <- FALSE
+
+cp_rep4 <- read.csv("../Output/rep4/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep4$rep <- "rep4"
+cp_rep4$is_neworder <- FALSE
+
+
+# New order based on pycytominer
+cp_rep1_neworder <- read.csv("../Output/rep1/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
+cp_rep1_neworder$rep <- "rep1"
+cp_rep1_neworder$is_neworder <- TRUE
+
+cp_rep2_neworder <- read.csv("../Output/rep2/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
+cp_rep2_neworder$rep <- "rep2"
+cp_rep2_neworder$is_neworder <- TRUE
+
+cp_rep3_neworder <- read.csv("../Output/rep3/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
+cp_rep3_neworder$rep <- "rep3"
+cp_rep3_neworder$is_neworder <- TRUE
+
+cp_rep4_neworder <- read.csv("../Output/rep4/New Order/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep4_neworder$rep <- "rep4"
+cp_rep4_neworder$is_neworder <- TRUE
+
+
+# Combine all
+cp <- rbind(
+  cp_rep1, cp_rep2, cp_rep3, cp_rep4,
+#  cp_rep1_neworder  
+#  cp_rep2_neworder 
+  cp_rep3_neworder,
+  cp_rep4_neworder
+)
+```
+
+##Mutate and plotr
+```{r}
+cp <- cp %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "is_neworder"))) %>%
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_neworder, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+ggsave("../Output/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
+```

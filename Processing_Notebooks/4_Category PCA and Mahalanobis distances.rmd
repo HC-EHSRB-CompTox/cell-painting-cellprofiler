@@ -9,6 +9,9 @@ library(cowplot)
 
 #Category level Principal component analysis, Mahalanobis distance calculations, and Concentration-response analysis
 ```{r}
+#Load in from sheet 2 so feature names are correct
+test_chem_well <- read.csv(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+
 #Transpose
 test_chem_well_cat <- t(test_chem_well)
 test_chem_well_cat <- as.data.frame(test_chem_well_cat)
@@ -160,17 +163,11 @@ lapply(chem_list, function(x){
 
 #Tcplfit2
 ```{r}
-
 #Concentration-response modeling of each category
 mahal_dist_chem <- as.data.frame(mahal_dist_chem)
 
 test_chem_res <- mahal_dist_chem %>%
   filter(chem != ctrl_group)
-
-###########################################################################
-#Exclude wells with >50% reduction in relative cell count
-test_chem_res <- test_chem_res %>%
-  filter(!paste(chem, concentration) %in% paste(cytotoxic_conc$Metadata_Chemical, cytotoxic_conc$Metadata_Concentration))
 
 #####Tcplfit2 to derive benchmark concentrations#####
 

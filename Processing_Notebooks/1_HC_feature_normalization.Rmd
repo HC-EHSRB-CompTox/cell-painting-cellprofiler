@@ -1,3 +1,4 @@
+
 # load libraries
 ```{r}
 library(readxl)
@@ -12,54 +13,31 @@ library(vroom)
 library(data.table)
 library(fst)
 library(caret)
+library(matrixStats)
+library(RhpcBLASctl)
+
+setDTthreads(8)
 ```
-
-
 
 #Load data
 ```{r}
-# Feature immdieatly removed (based on pychitomter bloacklis)
-blocks <- c(
-  paste0("Correlation_Manders_", c(
-    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
-    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
-    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
-    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
-    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
-  ), "_nuclei"),
-  paste0("Correlation_RWC_", c(
-    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
-    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
-    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
-    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
-    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
-  ), "_nuclei"),
-  paste0(
-    "Granularity_", rep(14:16, times = 5), "_",
-    rep(c("AGP","DNA","ER","Mito","RNA"), each = 3), "_nuclei"
-  )
-)
-extra_blocks <- c("Zernike")
+# Read in 
+read_compartment <- function(path, suffix, key_cols) {
+  all_cols <- names(vroom(path, n_max = 0, num_threads = 8,
+                          show_col_types = FALSE))
 
-build_drop_regex <- function(py_blocklist, extra_blocklist) {
-  exact      <- paste0("^(", paste(py_blocklist, collapse = "|"), ")$")
-  substr_pat <- paste(extra_blocklist, collapse = "|")
-  paste(exact, substr_pat, sep = "|")
+  suffixed <- if_else(all_cols %in% key_cols,
+                      all_cols,
+                      paste0(all_cols, suffix))
+
+  df <- vroom(path,
+              num_threads = 8,
+              col_select = everything(),
+              show_col_types = FALSE)
+
+  setNames(df, suffixed)
 }
-drop_regex <- build_drop_regex(blocks, extra_blocks)
-
-# ── Read one compartment ───────────────────────────────────────────────────────
-read_compartment <- function(path, suffix, key_cols, drop_regex) {
-  all_cols  <- names(vroom(path, n_max = 0, show_col_types = FALSE))
-  suffixed  <- if_else(all_cols %in% key_cols, all_cols, paste0(all_cols, suffix))
-  keep_mask <- !grepl(drop_regex, suffixed, perl = TRUE)
-  keep_orig <- all_cols[keep_mask]
-  keep_suf  <- suffixed[keep_mask]
-  df <- vroom(path, col_select = all_of(keep_orig), show_col_types = FALSE)
-  setNames(df, keep_suf)
-}
-
-# ── Feature breakdown reporter ─────────────────────────────────────────────────
+# Add a suffix dependent on cellular compartment and tell me breakdown info
 report_plate_features <- function(merged_df, plate_name) {
   all_cols <- names(merged_df)
   
@@ -83,8 +61,8 @@ report_plate_features <- function(merged_df, plate_name) {
   invisible(compartment_counts)
 }
 
-# ── Merge one plate ────────────────────────────────────────────────────────────
-merge_plate <- function(plate_dir, drop_regex) {
+# Merge into 1 df
+merge_plate <- function(plate_dir) {
   cells_path <- file.path(plate_dir, "Cells.csv")
   if (!file.exists(cells_path)) {
     message("Skipping empty folder: ", plate_dir)
@@ -99,7 +77,7 @@ merge_plate <- function(plate_dir, drop_regex) {
       message("  Skipping missing file: ", path)
       return(NULL)
     }
-    read_compartment(path, suffix, key_cols, drop_regex)
+    read_compartment(path, suffix, key_cols)
   }
   
   Cells     <- try_read("Cells.csv",     "_cells")
@@ -120,7 +98,6 @@ merge_plate <- function(plate_dir, drop_regex) {
   merged
 }
 
-# ── Main entry point ───────────────────────────────────────────────────────────
 merge_data <- function(cell_profiler_process_path, plates = NULL) {
   if (is.null(plates)) {
     plates <- list.dirs(cell_profiler_process_path,
@@ -132,7 +109,7 @@ merge_data <- function(cell_profiler_process_path, plates = NULL) {
   for (i in seq_along(plates)) {
     plate_dir  <- file.path(cell_profiler_process_path, plates[[i]])
     message("Reading: ", plate_dir)
-    result[[i]] <- merge_plate(plate_dir, drop_regex)
+    result[[i]] <- merge_plate(plate_dir)
     gc()
   }
   
@@ -149,15 +126,44 @@ merge_data <- function(cell_profiler_process_path, plates = NULL) {
 # ── Run ────────────────────────────────────────────────────────────────────────
 all_data <- merge_data(cell_profiler_process_path)
 
+#little fixxy
 all_data$Metadata_Chemical <- gsub("Staurosprine", "Staurosporine", all_data$Metadata_Chemical)
 
+
+
+#Just checking some general info
+#feilds used per well per plate
+fields_per_well <- all_data %>%
+  group_by(Metadata_Plate, Metadata_Well) %>%
+  summarise(
+    n_fields = n_distinct(ImageNumber),
+    .groups = "drop"
+  )
+
+head(fields_per_well)
+
+#cell per well per plate
+cells_per_well <- all_data %>%
+  group_by(Metadata_Plate, Metadata_Well) %>%
+  summarise(
+    n_cells = n(),
+    .groups = "drop"
+  )
+
+head(cells_per_well)
+```
+
+
+
+#Normalization
+```{r}
 # Eliminate wells with fewer than 50 valid objects
 df_50cells <- all_data %>%
   group_by(Metadata_Plate, Metadata_Well) %>%
   filter(n() >= 50) %>%
   ungroup()
 
-rm(all_data)
+rm(all_data); gc()
 
 # Remove columns that are all NA or all 0 (keeping Metadata_ columns)
 metadata_cols <- grepl("^Metadata_", names(df_50cells))
@@ -169,14 +175,10 @@ keep <- metadata_cols | (
 )
 
 df_50cells <- df_50cells[, keep]
-```
-
-
-
-#Feature Selection and Normalization
-```{r}
 test_chem <- df_50cells
-rm(df_50cells)
+rm(df_50cells); gc()
+
+#Normalization
 ##calculate ctrl(solvent) median and median absolute deviation (MAD) using all control cells across the plates
 ctrl_cells <- subset(test_chem,  Metadata_Chemical %in% ctrl_group)
 
@@ -224,10 +226,15 @@ if(ncol(ctrl_mad_zero)>0){
   rm(ctrl_mad_zero)
   }
 
-rm(ctrl_med, ctrl_mad, ctrl_mad_zero)
+rm(ctrl_med, ctrl_mad, ctrl_mad_zero); gc()
 ```
 
-#Data Aggregation by Well
+
+
+
+
+
+#Aggregate
 ```{r}
 print("Aggregating cell-level data to well-level")
 
@@ -244,6 +251,7 @@ test_chem_well <- test_chem %>%
 print("Scaling well-level data to SD of vehicle control")
 
 feature_cols  <- names(test_chem_well)[5:ncol(test_chem_well)]
+
 # Compute SD from control wells
 ctrl_SD_w <- test_chem_well %>%
   filter(Metadata_Chemical == ctrl_group) %>%
@@ -253,18 +261,254 @@ ctrl_SD_w <- test_chem_well %>%
 
 test_chem_well <- test_chem_well %>%
   mutate(across(all_of(feature_cols), ~ .x / ctrl_SD_w[[cur_column()]]))
+```
+#Feature selection
+```{r}
+#Blocked feature from pycytominer
+blocks <- c(
+  paste0("Correlation_Manders_", c(
+    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
+    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
+    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
+    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
+    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
+  ), "_nuclei"),
+  paste0("Correlation_RWC_", c(
+    "AGP_DNA","AGP_ER","AGP_Mito","AGP_RNA",
+    "DNA_AGP","DNA_ER","DNA_Mito","DNA_RNA",
+    "ER_AGP","ER_DNA","ER_Mito","ER_RNA",
+    "Mito_AGP","Mito_DNA","Mito_ER","Mito_RNA",
+    "RNA_AGP","RNA_DNA","RNA_ER","RNA_Mito"
+  ), "_nuclei"),
+  paste0(
+    "Granularity_", rep(14:16, times = 5), "_",
+    rep(c("AGP","DNA","ER","Mito","RNA"), each = 3), "_nuclei"
+  )
+)
 
+test_chem_well <- test_chem_well %>%
+  select(-any_of(blocks))
+```
+
+#Cytotoxicity
+```{r}
+cell_count <- as.data.frame(test_chem_cc)
+cell_count$Metadata_Concentration <- cell_count$Metadata_Concentration + 1
+
+#I added group by plate to everything
+cell_count_avg <- cell_count %>%
+  group_by(Metadata_Chemical, Metadata_Concentration, Metadata_Plate) %>%
+  summarise(Average_cc = mean(cell_count),
+            SD = sd(cell_count))
+
+cell_count_avg$relative_cc <- cell_count_avg$Average_cc/cell_count_avg[cell_count_avg$Metadata_Chemical== ctrl_group, ]$Average_cc
+
+cell_count_avg$SD_rel_cc <- cell_count_avg$relative_cc*sqrt((cell_count_avg$SD/cell_count_avg$Average_cc)^2 + (cell_count_avg[cell_count_avg$Metadata_Chemical == ctrl_group, ]$SD/cell_count_avg[cell_count_avg$Metadata_Chemical == ctrl_group, ]$Average_cc)^2)
+
+#cut-off for reduction in cell count
+cytotoxic_conc <- cell_count_avg %>%
+  filter(relative_cc < 0.5)
+
+#Exclude wells with >50% reduction in relative cell count
+test_chem_well <- test_chem_well %>%
+  filter(!paste(Metadata_Chemical, Metadata_Concentration) %in% paste(cytotoxic_conc$Metadata_Chemical, cytotoxic_conc$Metadata_Concentration))
+
+#Eliminate feats with no variance across samples
+variances <- apply(test_chem_well, 2, var)
+no_var <- which(variances == 0)
+
+if(length(no_var) != 0 & is.numeric(no_var)){
+  test_chem_well <- test_chem_well[, -no_var]
+}
+```
+
+#Saving
+```{r}
 print("Saving well-level data as .csv files")
 
 #write_csv(test_chem, file.path(pipeline_output_path, "test_chem.csv"))
 
-saveRDS(
-  test_chem_cc,
-  file = file.path(pipeline_output_path, "test_chem_cc.rds")
-)
+#saveRDS(
+#test_chem_cc,
+#file.path(pipeline_output_path, "test_chem_cc.rds")
+#)
 
 write_csv(test_chem_well, file.path(pipeline_output_path,"test_chem_well.csv"))
 
+rm()
+gc()
 ```
 
 
+#New analysis
+```{r}
+test_chem_well <- read_csv(
+    file.path(pipeline_output_path, "test_chem_well.csv")
+)
+#Remove low variance features from pycytominer
+variance_threshold <- 1e-5
+metadata_cols <- 1:4   # first four columns are metadata
+feature_mat <- test_chem_well[, -(metadata_cols), drop = FALSE]
+
+variances <- matrixStats::colVars(as.matrix(feature_mat), na.rm = TRUE)
+
+keep_features <- !is.na(variances) & variances > variance_threshold ## 88 features that have NA values..
+
+feature_mat_var <- cbind(
+    test_chem_well[, metadata_cols],
+    feature_mat[, keep_features, drop = FALSE]
+)
+cat("Original features:", ncol(test_chem), "\n")
+cat("Remaining features:", ncol(test_chem_var), "\n")
+cat("Removed features:", sum(!keep_features), "\n")
+
+#Correlation thresholds from pycytominer (range)
+corr_thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
+ corr_matrix <- cor(
+    feature_mat_var,
+    method = "pearson",
+    use = "pairwise.complete.obs")
+
+# Apply different thresholds
+corr_results <- lapply(corr_thresholds, function(thresh) {
+
+  remove <- findCorrelation(
+    corr_matrix,
+    cutoff = thresh,
+    exact = TRUE
+  )
+
+  test_chem_var[, -remove, drop = FALSE]
+})
+
+names(corr_results) <- paste0("corr_", corr_thresholds)
+
+sapply(corr_results, ncol)
+# Name results
+names(corr_results) <- paste0("pearson_", corr_thresholds)
+removed_features <- lapply(corr_thresholds, function(thresh) {
+  corr_matrix <- cor(
+    test_chem_var,
+    method = "pearson",
+    use = "pairwise.complete.obs"
+  )
+  remove <- findCorrelation(
+    corr_matrix,
+    cutoff = thresh,
+    exact = TRUE
+  )
+  colnames(test_chem_var)[remove]
+})
+
+names(removed_features) <- paste0("pearson_", corr_thresholds)
+```
+
+#Saving
+```{r}
+print("Saving well-level data as .csv files")
+
+#write_csv(test_chem, file.path(pipeline_output_path, "test_chem.csv"))
+
+#saveRDS(
+#test_chem_cc,
+#file.path(pipeline_output_path, "test_chem_cc.rds")
+#)
+
+write_csv(test_chem_well, file.path(pipeline_output_path,"test_chem_well_lowvarience.csv"))
+
+rm()
+gc()
+```
+
+#Plotting
+```{r}
+relative_cell_count <- ggplot(cell_count_avg[cell_count_avg$Metadata_Chemical != ctrl_group,], aes(x = Metadata_Concentration, y = relative_cc, colour = Metadata_Chemical)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = relative_cc - SD_rel_cc, ymax = relative_cc + SD_rel_cc), width = 0.05) +
+    theme_bw() + 
+    theme(legend.position="none") +
+    scale_x_log10() +
+    ylim(0, 1.6) +
+    geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+    facet_wrap(vars(Metadata_Chemical), scales = "free")
+relative_cell_count
+plate_no <- unique(cell_count$Metadata_Plate)
+
+plate_plot <- lapply(plate_no, function(x){
+  
+  plate_data <- cell_count[cell_count$Metadata_Plate == x, ]
+  
+  # Create an ordered factor for Chemical with ctrl_group first
+  plate_data$Metadata_Chemical <- factor(plate_data$Metadata_Chemical, 
+                                levels = c(ctrl_group, setdiff(unique(plate_data$Metadata_Chemical), ctrl_group)), 
+                                ordered = TRUE)
+  
+  y_min <- min(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count)
+  y_max <- max(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count)
+  
+  plate_plot <- ggplot(plate_data, aes(x=Metadata_Concentration, y=cell_count, colour=Metadata_Chemical)) + 
+    geom_point() + 
+   # geom_errorbar(aes(ymin = relative_cc - SD_rel_cc, ymax = relative_cc + SD_rel_cc), width = 0.05) +
+    geom_ribbon(aes(ymin = y_min, ymax = y_max), fill = "grey70", alpha = 0.5) +        
+    geom_hline(yintercept = median(plate_data[plate_data$Metadata_Chemical == ctrl_group,]$cell_count), linetype = "dashed", color = "red") +
+    scale_y_continuous() +
+    ylim(min(plate_data$cell_count)-50, max(plate_data$cell_count)+50) +
+    scale_x_log10() +
+    theme(legend.position="none") +
+    scale_color_brewer(palette = "Paired") +
+    geom_text(aes(label = Metadata_Well), size = 2, vjust = -1, hjust = 0.5) +
+    facet_wrap(vars(Metadata_Chemical), scales = "free") +
+    ggtitle(paste0("Plate ", x))
+  
+    plate_plot
+  }) 
+
+nrow <- length(plate_no)
+
+combined_plot <- do.call(plot_grid, c(plate_plot, nrow = nrow))
+
+ggsave(file.path(plots, "Cell count by chemical_all plates.png"), combined_plot, width = 20, height = 60,units = "cm")
+
+ggsave(file.path(plots,"Relative cell count.png"), relative_cell_count, width = 50, height = 30, units = "cm")
+
+ctrl_plot <- ggplot(cell_count[cell_count$Metadata_Chemical == ctrl_group,], aes(x= as.character(Metadata_Plate), y=cell_count, colour=Metadata_Plate)) + 
+  geom_point() + 
+  scale_y_continuous() +
+  theme(legend.position="none") +
+  xlab("Plate Number") +
+  ylab("Cell count") +
+  geom_text(aes(label = Metadata_Well), size = 2, vjust = -1, hjust = 0.5) +
+  ggtitle(paste0("Vehicle Control (",ctrl_group, ")"))
+
+ctrl_plot
+ggsave(file.path(plots, "Cell count_ctrl_all plates.png"), ctrl_plot, width = 20, height = 60,units = "cm")
+
+## Cell density heatmap
+
+plate_cell_count <- test_chem_cc
+
+plate_cell_count <- plate_cell_count %>%
+  mutate(Metadata_Well = str_trim(Metadata_Well)) %>%
+  separate(Metadata_Well, into = c("Row", "Column"), sep = "(?<=^.)") %>%
+  separate(Column, into = c("Column", "Metadata_Plate"), sep = "_", fill = "right", extra = "merge")
+
+plate_cell_count$Column <- factor(plate_cell_count$Column, levels = as.character(1:12))
+
+plate_cell_count$Row <- factor(plate_cell_count$Row, levels = LETTERS[8:1])
+
+cellcount_hm <- ggplot(plate_cell_count, aes(x = Column, y = Row, fill = cell_count)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  theme(title = element_text(size = 13),
+        axis.title.x = element_text(size = 16, margin = margin(t=15)),
+        axis.title.y = element_text(size = 16, margin = margin(r=15)),
+        axis.text.x = element_text(size = 14, colour = "black"),
+        axis.text.y = element_text(size = 14, colour = "black", margin=margin(r=5)),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 13, colour = "black")) +
+  labs(title = "Cell count across 9 fields of view (96-well plate)", x = "Columns", y = "Rows", fill = "Cell Count") +
+  facet_grid(rows=vars(Metadata_Plate))
+
+cellcount_hm
+```

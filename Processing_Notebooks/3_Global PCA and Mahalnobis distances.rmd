@@ -10,16 +10,10 @@ library(gridExtra)
 ```
 #Global level Principal component analysis, Mahalanobis distance calculations, and Concentration-response analysis
 ```{r}
-#test_chem_well.RData as input
+test_chem_well <- read.csv(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+
+#Load in from sheet 2 so feature names are correct
 well_data <- test_chem_well
-
-#Eliminate feats with no variance across samples
-variances <- apply(well_data, 2, var)
-no_var <- which(variances == 0)
-
-if(length(no_var) != 0 & is.numeric(no_var)){
-  well_data <- well_data[, -no_var]
-}
 
 #Principal component analysis (PCA)
 pca <- prcomp(well_data, center = TRUE, scale = TRUE)
@@ -226,11 +220,6 @@ ggsave(
 test_chem_res <- mahal_dist %>%
   filter(chem !=ctrl_group)
 
-###########################################################################
-#Exclude wells with >50% reduction in relative cell count
-test_chem_res <- test_chem_res %>%
-  filter(!paste(chem, concentration) %in% paste(cytotoxic_conc$Metadata_Chemical, cytotoxic_conc$Metadata_Concentration))
-
 #####Tcplfit2 to derive benchmark concentrations#####
 
 chem_list <- unique(test_chem_res$chem)
@@ -305,7 +294,7 @@ tcpl_testchem <- tcpl_results %>%
 
 
 ggsave(
-  filename = file.path(plots, "Global_BMC.png"),
+  filename = file.path(plots, "Global_BMC__sqrt_neworder.png"),
   plot = ggplot(tcpl_testchem, aes(x = bmd, y = name, colour = name)) +
     geom_point(size = 2) +
     geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
@@ -331,6 +320,5 @@ ggsave(
 tcpl_testchem$exp_name <- exp_name
 #Save tcpl results
 write_csv(tcpl_testchem, file = paste0(pipeline_output_path, "_Global fitting Mahalanobis - tcplResult.csv"))
-
 ```
 
