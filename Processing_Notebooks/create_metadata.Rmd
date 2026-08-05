@@ -8,21 +8,21 @@ library(readxl)
 #Paths and info
 ```{r}
 #change things here depedning on experiment 
-image_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/raw images/"
+image_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep3/raw images/"
 #Plate Map Info 
-cell_profiler_input_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/Input/"
+cell_profiler_input_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep3/Input/"
   
-metadata_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/metadata/"
+metadata_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep3/metadata/"
 dir.create(metadata_path, recursive = TRUE, showWarnings = FALSE)
 
 #Create a folder path to find .csv files from cell profiler
-cell_profiler_process_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/Output/"
+cell_profiler_process_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep3/Output/"
 
-pipeline_output_path <- "/data/cell-painting-cellprofiler/Output/rep2/"
+pipeline_output_path <- "/data/cell-painting-cellprofiler/Output/rep3/"
 dir.create(pipeline_output_path, recursive = TRUE, showWarnings = FALSE)
 
 #Create experiment name (for labeling files)
-exp_name <- paste("rep2")
+exp_name <- paste("rep3")
 ctrl_group <- "DMSO"
 
 ```
@@ -184,17 +184,16 @@ df_cp %>%
 #Source code
 ```{r}
 #### 1. Feature Normalization seems to work bests when i run this notebooks not render 
-rmarkdown::render("/data/cell-painting-cellprofiler/Processing_Notebooks/1_HC_new order.Rmd")
+rmarkdown::render("/data/cell-painting-cellprofiler/Processing_Notebooks/1_HC_feature_normalization.Rmd")
 
 #### 2. Reformatting of feature names and grouping by category
-plots <- "../Plots/rep2/New Order/reformatting"
-dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/2_Reformat_feature_names.rmd")
 write.csv(test_chem_well,file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv"), row.names = TRUE)
 
 #### 3. Global Mahalanobis distance calculation and BMC analysis
-plots <-"../Plots/rep2/New Order/Global"
+plots <-"../Plots/rep3/Mal_sqrt/"
 dir.create(plots, recursive = TRUE, showWarnings = FALSE)
+pipeline_output_path <- "/data/cell-painting-cellprofiler/Output/rep3/Mal_sqrt/"
 rmarkdown::render("../Processing_Notebooks/3_Global PCA and Mahalnobis distances.rmd")
 
 #### 4. Categorical Mahalanobis distance calculation and BMC analysis

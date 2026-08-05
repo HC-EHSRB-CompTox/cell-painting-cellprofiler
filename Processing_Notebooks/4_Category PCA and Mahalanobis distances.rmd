@@ -10,7 +10,14 @@ library(cowplot)
 #Category level Principal component analysis, Mahalanobis distance calculations, and Concentration-response analysis
 ```{r}
 #Load in from sheet 2 so feature names are correct
-test_chem_well <- read.csv(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+test_chem_well <- read_csv(
+  file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+)
+
+# Move first column to row names
+test_chem_well <- as.data.frame(test_chem_well)
+rownames(test_chem_well) <- test_chem_well[[1]]
+test_chem_well <- test_chem_well[, -1]
 
 #Transpose
 test_chem_well_cat <- t(test_chem_well)
