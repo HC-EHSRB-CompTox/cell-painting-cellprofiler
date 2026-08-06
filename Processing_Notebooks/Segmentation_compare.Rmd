@@ -6,10 +6,10 @@ library(ggplot2)
 
 #Load data
 ```{r}
-cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
-cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
-cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
-cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
+cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
+cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
+cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp <- rbind(cp_rep1, cp_rep2,cp_rep3,cp_rep4)
 columbus <- read.csv("../Input/All exp BMC.csv")
 nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
@@ -99,7 +99,7 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
   )
 
 plot
-ggsave("../Output/combined_nosqrt.png", plot, width = 60, height = 60,units = "cm")
+ggsave("../Plots/combined_nosqrt.png", plot, width = 60, height = 60,units = "cm")
 ```
 
 

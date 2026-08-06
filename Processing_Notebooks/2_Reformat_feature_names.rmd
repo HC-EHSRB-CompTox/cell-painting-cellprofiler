@@ -6,17 +6,25 @@ library(ggplot2)
 library(cowplot)
 library(data.table)
 library(tidyverse)
+
+dir.create(
+  file.path(pipeline_output_path, "feature_results"),
+  showWarnings = FALSE,
+  recursive = TRUE
+)
 ```
 
 #Features
 ```{r}
-test_chem_well <- read_csv(
-    file.path(pipeline_output_path, "test_chem_well.csv")
-)
+# Reformat one test_chem_well-style data frame: collapse verbose CellProfiler
+# feature names into simplified category names and set Chemical_Conc_Well_Plate
+# as the row name. Wrapped as a function so it can be applied to every
+# feature-selected variant produced by the previous notebook.
+reformat_feature_names <- function(test_chem_well) {
 
 test_chem_well <- as.data.frame(test_chem_well)
 variances <- apply(test_chem_well, 2, var)
-variances[1:7] <- 1
+variances[1:4] <- 1
 
 test_chem_well <- test_chem_well[, variances != 0 & !is.na(variances)]
 
@@ -163,5 +171,37 @@ rownames(test_chem_well) <- rows
 
 test_chem_well <- test_chem_well %>%
   dplyr::select(-Chemical)
+
+test_chem_well
+}
+
+# Loop over every feature-selected variant saved by the previous notebook
+# (test_chem_well.csv, test_chem_well_lowvariance.csv,
+#  test_chem_well_pearson_*.csv, test_chem_well_lowvar_pearson_*.csv, ...)
+# and write out a correspondingly-named, reformatted CSV.
+input_files <- list.files(
+  pipeline_output_path,
+  pattern = "^test_chem_well.*\\.csv$",
+  full.names = TRUE
+)
+
+walk(input_files, function(path) {
+  message("Reformatting: ", basename(path))
+
+  df <- read_csv(path, show_col_types = FALSE)
+  reformatted <- reformat_feature_names(df)
+
+  out_name <- str_replace(
+    basename(path),
+    "^test_chem_well",
+    "Well-level_data_simplified_categories"
+  )
+
+  write.csv(
+    reformatted,
+    file.path(pipeline_output_path, "feature_results", out_name),
+    row.names = TRUE
+  )
+})
 ```
 

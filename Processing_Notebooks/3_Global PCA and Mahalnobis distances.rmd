@@ -7,11 +7,17 @@ library(patchwork)
 library(cowplot)
 library(MASS)
 library(gridExtra)
+
+dir.create(
+  file.path(pipeline_output_path, "tcplfit_results"),
+  showWarnings = FALSE,
+  recursive = TRUE
+)
 ```
 #Global level Principal component analysis, Mahalanobis distance calculations, and Concentration-response analysis
 ```{r}
 test_chem_well <- read_csv(
-  file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+  file.path(pipeline_output_path, "feature_results", "Well-level_data_simplified_categories.csv")
 )
 
 # Move first column to row names
@@ -145,8 +151,8 @@ lapply(plate, function(plate_i) {
     facet_wrap(vars(chem), scales = "free") +
     theme(strip.text.x = element_text(size = 12, face = "bold"))
 
-  ggsave(
-    filename = file.path(plots, paste0("Plate_", plate_i, "_Global_Mahalanobis.png")), plot = p,width = 50, height = 35, units = "cm")
+#  ggsave(
+ #   filename = file.path(plots, paste0("Plate_", plate_i, "_Global_Mahalanobis.png")), plot = p,width = 50, height = 35, units = "cm")
 
   p
 })
@@ -218,8 +224,8 @@ mahaldist_hm <- ggplot(mahal_dist, aes(x = Column, y = Row, fill = mahal_dist)) 
 
 mahaldist_hm
 
-ggsave(
-  filename = file.path(plots, "Mahalanobis_distance_heatmaps.png"), plot = mahaldist_hm,width = 20,height = 60, units = "cm")
+#ggsave(
+ # filename = file.path(plots, "Mahalanobis_distance_heatmaps.png"), plot = mahaldist_hm,width = 20,height = 60, units = "cm")
 ```
 
 #tcplfit2
@@ -265,9 +271,9 @@ tcpl_results <- lapply(chem_list, function(x){
   tcpl_chem <- conc_res_modeling(chem_data, vehicle_ctrl)
   
   if(tcpl_chem$hitcall > 0.9){
-    png(file = paste0(plots, "_tcplfit_curves.png"))
+   # png(file = paste0(plots, "_tcplfit_curves.png"))
     concRespPlot(tcpl_chem, ymin=min(chem_data$mahal_dist)-5, ymax=max(chem_data$mahal_dist)+10, draw.error.arrows = FALSE)
-    dev.off()
+    # dev.off()
   }
   
   tcpl_chem
@@ -301,7 +307,7 @@ tcpl_testchem <- tcpl_results %>%
 
 
 ggsave(
-  filename = file.path(plots, "Global_BMC__sqrt_neworder.png"),
+  filename = file.path(plots, "Global_BMC__sqrt.png"),
   plot = ggplot(tcpl_testchem, aes(x = bmd, y = name, colour = name)) +
     geom_point(size = 2) +
     geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
@@ -326,5 +332,260 @@ ggsave(
 
 tcpl_testchem$exp_name <- exp_name
 
+```
+
+# Global PCA, Mahalanobis distances, and BMD — All feature sets
+```{r}
+# Discover all Well-level simplified CSV files produced by sheet 2
+simplified_files <- list.files(
+  file.path(pipeline_output_path, "feature_results"),
+  pattern = "^Well-level_data_simplified_categories.*\\.csv$",
+  full.names = TRUE
+)
+
+message("Found ", length(simplified_files), " feature-set files to process.")
+
+walk(simplified_files, function(path) {
+
+  # --- Label for output file names ---
+  file_label <- basename(path) |>
+    stringr::str_remove("^Well-level_data_simplified_categories") |>
+    stringr::str_remove("\\.csv$")
+
+  if (file_label == "") file_label <- "_all_features"
+
+  message("\n=== Processing: ", basename(path), " ===")
+
+  # --- Load data ---
+  well_data <- read_csv(path, show_col_types = FALSE) |>
+    as.data.frame()
+  rownames(well_data) <- well_data[[1]]
+  well_data <- well_data[, -1]
+
+  # --- PCA ---
+  pca <- prcomp(well_data, center = TRUE, scale = TRUE)
+
+  scree_plot <- fviz_eig(
+    pca, addlabels = TRUE, ylim = c(0, 75),
+    main = paste0("Scree plot — ", file_label)
+  )
+  #ggsave(
+   # filename = file.path(plots, paste0("Scree", file_label, ".png")),
+   # plot = scree_plot, width = 20, height = 12, units = "cm"
+ # )
+
+  # Number of PCs explaining >95% variance
+  cumulative_prop <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
+  PC_95 <- length(which(cumulative_prop < 0.95)) + 1
+
+  pca_x <- as.data.frame(pca$x)
+  pca_x <- as.data.frame(cbind(chem = rownames(well_data), pca_x))
+
+  ctrl_pc <- pca_x |>
+    dplyr::filter(grepl(ctrl_group, chem))
+  ctrl_pc  <- ctrl_pc[, -1]
+  ctrl_mean <- apply(ctrl_pc, 2, mean)
+
+  dat <- as.matrix(well_data) %*% pca$rotation[, 1:PC_95]
+  Cov <- cov(dat)
+  solved_cov <- MASS::ginv(Cov)
+
+  # --- Mahalanobis distances ---
+  mahal_dist_raw <- mahalanobis(dat, ctrl_mean[1:PC_95], solved_cov, inverted = TRUE)
+  mahal_dist_df  <- as.data.frame(sqrt(mahal_dist_raw))
+  colnames(mahal_dist_df) <- "mahal_dist"
+
+  mahal_dist_df <- cbind(chem = rownames(well_data), mahal_dist_df)
+
+  sample <- tibble(sample = as.character(mahal_dist_df$chem)) |>
+    tidyr::separate(sample, c("chem", "concentration", "Well", "Plate"),
+                    sep = "_", remove = TRUE)
+
+  mahal_dist_df <- cbind(sample, mahal_dist = mahal_dist_df$mahal_dist)
+  mahal_dist_df$concentration <- as.numeric(mahal_dist_df$concentration)
+
+  mahal_dist_df <- mahal_dist_df |>
+    dplyr::group_by(chem) |>
+    dplyr::mutate(conc_count = length(unique(concentration)))
+
+  mahal_ctrl_i <- mahal_dist_df |> dplyr::filter(chem == ctrl_group)
+
+  mahal_dist_df <- mahal_dist_df |>
+    dplyr::filter(conc_count > 3) |>
+    rbind(mahal_ctrl_i)
+
+  mahal_dist_df[mahal_dist_df$chem == ctrl_group, ]$concentration <- 1
+  mahal_dist_df$exp <- exp_name
+
+  # --- Per-plate Mahalanobis plots ---
+  lapply(unique(mahal_dist_df$Plate), function(plate_i) {
+    p <- ggplot(
+      mahal_dist_df[mahal_dist_df$Plate == plate_i, ],
+      aes(x = concentration, y = mahal_dist, colour = chem)
+    ) +
+      geom_point() +
+      geom_hline(yintercept = median(mahal_ctrl_i$mahal_dist),
+                 linetype = "dashed", color = "maroon4") +
+      geom_ribbon(
+        aes(ymin = median(mahal_ctrl_i$mahal_dist) - mad(mahal_ctrl_i$mahal_dist),
+            ymax = median(mahal_ctrl_i$mahal_dist) + mad(mahal_ctrl_i$mahal_dist)),
+        fill = "thistle3", colour = NA, alpha = 0.5
+      ) +
+      scale_x_log10() +
+      xlab("Concentration (\u03BCM)") + ylab("Mahalanobis Distance") +
+      theme_classic() +
+      theme(
+        legend.position = "none",
+        axis.title.x = element_text(size = 17, margin = margin(t = 15)),
+        axis.title.y = element_text(size = 17, margin = margin(r = 15)),
+        axis.text.x  = element_text(size = 12),
+        axis.text.y  = element_text(size = 12)
+      ) +
+      facet_wrap(vars(chem), scales = "free") +
+      theme(strip.text.x = element_text(size = 12, face = "bold")) +
+      ggtitle(paste0("Plate ", plate_i, file_label))
+
+    # ggsave(
+    #   filename = file.path(
+    #     plots, paste0("Plate_", plate_i, file_label, "_Global_Mahalanobis.png")
+    #   ),
+    #   plot = p, width = 50, height = 35, units = "cm"
+    # )
+  })
+
+  # --- Global Mahalanobis plot ---
+  p_global <- ggplot(mahal_dist_df,
+                     aes(x = concentration, y = mahal_dist, colour = chem)) +
+    geom_point(size = 3) +
+    geom_hline(yintercept = median(mahal_ctrl_i$mahal_dist),
+               linetype = "dashed", color = "maroon4") +
+    geom_ribbon(
+      aes(ymin = median(mahal_ctrl_i$mahal_dist) - mad(mahal_ctrl_i$mahal_dist),
+          ymax = median(mahal_ctrl_i$mahal_dist) + mad(mahal_ctrl_i$mahal_dist)),
+      fill = "thistle3", colour = NA, alpha = 0.5
+    ) +
+    scale_x_log10() +
+    xlab("Concentration (\u03BCM)") + ylab("Mahalanobis Distance") +
+    theme_classic() +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_text(size = 17, margin = margin(t = 15)),
+      axis.title.y = element_text(size = 17, margin = margin(r = 15)),
+      axis.text.x  = element_text(size = 12),
+      axis.text.y  = element_text(size = 12)
+    ) +
+    facet_wrap(vars(chem), scales = "free") +
+    theme(strip.text.x = element_text(size = 12, face = "bold")) +
+    ggtitle(paste0(exp_name, file_label))
+
+  # ggsave(
+  #   filename = file.path(plots, paste0(exp_name, file_label, "_Global_Mahalanobis.png")),
+  #   plot = p_global, width = 50, height = 35, units = "cm"
+  # )
+
+  # --- tcplfit2 concentration-response & BMD ---
+  test_chem_res_i <- mahal_dist_df |> dplyr::filter(chem != ctrl_group)
+  chem_list_i     <- unique(test_chem_res_i$chem)
+
+  vehicle_ctrl_i <- mahal_dist_df |>
+    dplyr::filter(chem == ctrl_group) |>
+    dplyr::summarise(
+      Median = median(mahal_dist, na.rm = TRUE),
+      nMad   = mad(mahal_dist, constant = 1.4826, na.rm = TRUE)
+    )
+
+  conc_res_modeling_i <- function(test_chem, vc) {
+    row <- list(
+      conc   = as.numeric(test_chem$concentration),
+      resp   = test_chem$mahal_dist,
+      bmed   = vc$Median,
+      cutoff = vc$nMad,
+      onesd  = vc$nMad,
+      name   = paste0(test_chem$chem[1]),
+      assay  = "Mahalanobis distance (cutoff = 1)"
+    )
+    tcplfit2::concRespCore(
+      row, conthits = TRUE, aicc = FALSE, force.fit = FALSE,
+      bidirectional = TRUE,
+      fitmodels = c("cnst", "hill", "poly1", "poly2", "pow",
+                    "exp2", "exp3", "exp4", "exp5")
+    )
+  }
+
+  tcpl_results_i <- lapply(chem_list_i, function(x) {
+    chem_data <- test_chem_res_i |> dplyr::filter(chem == x)
+    tcpl_chem  <- conc_res_modeling_i(chem_data, vehicle_ctrl_i)
+
+    # if (!is.null(tcpl_chem$hitcall) && tcpl_chem$hitcall > 0.9) {
+    #   png(file = file.path(
+    #     plots, paste0(x, file_label, "_tcplfit_curves.png")
+    #   ))
+    #   tcplfit2::concRespPlot(
+    #     tcpl_chem,
+    #     ymin = min(chem_data$mahal_dist) - 5,
+    #     ymax = max(chem_data$mahal_dist) + 10,
+    #     draw.error.arrows = FALSE
+    #   )
+    #   dev.off()
+    # }
+    tcpl_chem
+  }) |> do.call(rbind, args = _)
+
+  tcpl_testchem_i <- tcpl_results_i |>
+    dplyr::mutate(
+      minDose = min(conc, na.rm = TRUE),
+      maxDose = max(conc, na.rm = TRUE),
+      removal_reason = dplyr::case_when(
+        hitcall < 0.9   ~ "low_hitcall",
+        is.na(bmdl)     ~ "missing_bmdl",
+        is.na(bmdu)     ~ "missing_bmdu",
+        TRUE            ~ "kept"
+      ),
+      keep = removal_reason == "kept",
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA),
+      exp_name = exp_name
+    ) |>
+    dplyr::ungroup()
+
+  # --- BMD plot ---
+  bmd_plot <- ggplot(tcpl_testchem_i,
+                     aes(x = bmd, y = name, colour = name)) +
+    geom_point(size = 2) +
+    geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+    scale_x_log10() +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      axis.title.x  = element_text(size = 13, margin = margin(t = 15)),
+      axis.title.y  = element_text(size = 13),
+      axis.text.x   = element_text(size = 10, colour = "black"),
+      axis.text.y   = element_text(size = 6,  colour = "black", margin = margin(r = 5)),
+      strip.text.x  = element_text(size = 9, face = "bold"),
+      strip.background = element_rect(fill = NA),
+      panel.border  = element_rect(color = "black", fill = NA, linewidth = 1)
+    ) +
+    xlab("Median Best BMC (1 MAD above vehicle control) \u03BCM") +
+    ylab("Chemicals") +
+    ggtitle(paste0("BMD — ", file_label))
+
+  ggsave(
+    filename = file.path(plots, paste0("Global_BMC", file_label, ".png")),
+    plot = bmd_plot, width = 40, height = 20, units = "cm"
+  )
+
+  # --- Save tcpl results table ---
+write.csv(
+  tcpl_testchem_i,
+  file.path(
+    pipeline_output_path,
+    "tcplfit_results",
+    paste0("tcpl_results", file_label, ".csv")
+  ),
+  row.names = FALSE
+)
+  message("Done: ", basename(path))
+})
 ```
 

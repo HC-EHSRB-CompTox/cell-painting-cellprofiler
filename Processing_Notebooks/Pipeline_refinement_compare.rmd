@@ -7,37 +7,37 @@ library(ggplot2)
 ##Load data
 ```{r}
 # sqrt
-cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
 cp_rep1$rep <- "rep1"
 cp_rep1$is_sqrt <- TRUE
 
-cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
 cp_rep2$rep <- "rep2"
 cp_rep2$is_sqrt <- TRUE
 
-cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
 cp_rep3$rep <- "rep3"
 cp_rep3$is_sqrt <- TRUE
 
-cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult.csv")
+cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
 cp_rep4$rep <- "rep4"
 cp_rep4$is_sqrt <- TRUE
 
 
 # No sqrt
-cp_rep1_nosqrt <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep1_nosqrt <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep1_nosqrt$rep <- "rep1"
 cp_rep1_nosqrt$is_sqrt <- FALSE
 
-cp_rep2_nosqrt <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep2_nosqrt <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep2_nosqrt$rep <- "rep2"
 cp_rep2_nosqrt$is_sqrt <- FALSE
 
-cp_rep3_nosqrt <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep3_nosqrt <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep3_nosqrt$rep <- "rep3"
 cp_rep3_nosqrt$is_sqrt <- FALSE
 
-cp_rep4_nosqrt <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_nosqrt.csv")
+cp_rep4_nosqrt <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep4_nosqrt$rep <- "rep4"
 cp_rep4_nosqrt$is_sqrt <- FALSE
 
@@ -50,6 +50,7 @@ cp <- rbind(
   cp_rep3_nosqrt, 
   cp_rep4_nosqrt
 )
+
 ```
 
 ##Mutate and plotr
@@ -82,76 +83,48 @@ plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
   )
 
 plot
-ggsave("../Output/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
+ggsave("../Plots/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
 ```
 
-
-#New order compare
-##Load data
+##Load Columbus results
 ```{r}
-# normal order from eunnara
-cp_rep1 <- read.csv("../Output/rep1/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep1$rep <- "rep1"
-cp_rep1$is_neworder <- FALSE
+columbus<- read.csv("../Input/Definitive_study_BMC_sqrt_vs_nosqrt.csv")
 
-cp_rep2 <- read.csv("../Output/rep2/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep2$rep <- "rep2"
-cp_rep2$is_neworder <- FALSE
-
-cp_rep3 <- read.csv("../Output/rep3/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep3$rep <- "rep3"
-cp_rep3$is_neworder <- FALSE
-
-cp_rep4 <- read.csv("../Output/rep4/Mal_sqrt/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep4$rep <- "rep4"
-cp_rep4$is_neworder <- FALSE
-
-
-# New order based on pycytominer
-cp_rep1_neworder <- read.csv("../Output/rep1/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
-cp_rep1_neworder$rep <- "rep1"
-cp_rep1_neworder$is_neworder <- TRUE
-
-cp_rep2_neworder <- read.csv("../Output/rep2/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
-cp_rep2_neworder$rep <- "rep2"
-cp_rep2_neworder$is_neworder <- TRUE
-
-cp_rep3_neworder <- read.csv("../Output/rep3/New Order/_Global fitting Mahalanobis - tcplResult_sqrt_neworder.csv")
-cp_rep3_neworder$rep <- "rep3"
-cp_rep3_neworder$is_neworder <- TRUE
-
-cp_rep4_neworder <- read.csv("../Output/rep4/New Order/_Global fitting Mahalanobis - tcplResult.csv")
-cp_rep4_neworder$rep <- "rep4"
-cp_rep4_neworder$is_neworder <- TRUE
-
-
-# Combine all
-cp <- rbind(
-  cp_rep1, cp_rep2, cp_rep3, cp_rep4,
-#  cp_rep1_neworder  
-#  cp_rep2_neworder 
-  cp_rep3_neworder,
-  cp_rep4_neworder
-)
-```
-
-##Mutate and plotr
-```{r}
-cp <- cp %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "is_neworder"))) %>%
-  mutate(source = "CP") %>%
-  rename(exp = exp_name) %>%
+columbus <- columbus %>%
+  dplyr::filter(exp %in% c("Definitive_rep1",
+                           "Definitive_rep2",
+                           "Definitive_rep3",
+                           "Definitive_rep4")) %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp",  "Sqrt"))) %>%
+  mutate(source = "Columbus") %>%
   mutate(
     name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
     name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
   )
 
-shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
-plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_neworder, shape = exp)) +
+
+columbus <- columbus %>% 
+  mutate(is_sqrt = Sqrt == "Squarerooted") %>%
+  dplyr::select(-Sqrt)
+
+columbus <- columbus %>%
+  # rename exp IDs to reps
+  dplyr::mutate(
+    exp = dplyr::case_when(
+      exp %in% c("Definitive_rep1") ~ "rep1",
+      exp %in% c("Definitive_rep2") ~ "rep2",
+      exp %in% c("Definitive_rep3") ~ "rep3",
+      exp %in% c("Definitive_rep4") ~ "rep4",
+      TRUE ~ exp
+    )
+  )
+
+joined <- rbind(columbus, cp)
+
+plot <- ggplot(joined, aes(x = bmd, y = name, colour = is_sqrt, shape = source)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
   scale_x_log10() +
-  scale_shape_manual(name = "exp", values = shape_list) +
   theme_bw() +
   theme(
     legend.position = "right",
@@ -165,5 +138,104 @@ plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_neworder, shape = exp)) +
   )
 
 plot
-ggsave("../Output/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
+ggsave("../Plots/sqrt_bmd_results_columbus_cellprofiler.png", plot, width = 20, height = 60,units = "cm")
+```
+
+#New analysis comparision
+##Load data
+```{r}
+# Load tcplfit results from a given rep's folder. Written as a self-contained
+# function (rather than reassigning a shared `tcpl_results_folder` variable
+# before each rep's `list.files()` call) so a stray edit or out-of-order
+# chunk execution can't silently pull one rep's data from another rep's
+# folder (or a non-folder path).
+load_tcpl_folder <- function(folder) {
+  list.files(folder, pattern = "\\.csv$", full.names = TRUE) |>
+    map_dfr(function(path) {
+      label <- basename(path) |>
+        str_remove("^tcpl_results") |>
+        str_remove("\\.csv$")
+
+      read.csv(path) |>
+        mutate(
+          low_variance    = str_detect(label, "lowvar"),
+          pearson_thresh  = str_extract(label, "(?<=pearson_)[0-9.]+") |> as.numeric()
+        )
+    })
+}
+
+rep1 <- load_tcpl_folder("../Output/rep1/tcplfit_results/")
+rep2 <- load_tcpl_folder("../Output/rep2/tcplfit_results/")
+rep3 <- load_tcpl_folder("../Output/rep3/tcplfit_results/")
+rep4 <- load_tcpl_folder("../Output/rep4/tcplfit_results/")
+
+joined <- rbind(rep1, rep2, rep3, rep4)
+```
+
+##plot low varience
+```{r}
+
+all_results <- joined %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "pearson_thresh", "low_variance"))) %>%
+  dplyr::filter(is.na(pearson_thresh)) %>% #get rid of the pearson stuff for now
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+#shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+ggplot(all_results, aes(x = bmd, y = name, colour = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+ # scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  facet_wrap(~low_variance) +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+
+```
+##plot pearsons
+```{r}
+
+all_results <- joined %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "pearson_thresh", "low_variance"))) %>%
+  dplyr::filter(!low_variance) %>% #get rid of low varience est info
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+plot <- ggplot(all_results, aes(x = bmd, y = name, colour = pearson_thresh)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_colour_viridis_c(na.value = "red") +
+  theme_bw() +
+  facet_wrap(~exp) +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
 ```

@@ -358,25 +358,23 @@ library(RColorBrewer)
 library(ggplot2)
 library(cowplot)
 library(data.table)
-library(tidyverse)</code></pre>
-<p>#Features</p>
-<pre class="r"><code>test_chem_well &lt;- read_csv(
-    file.path(pipeline_output_path, &quot;test_chem_well.csv&quot;)
+library(tidyverse)
+
+dir.create(
+  file.path(pipeline_output_path, &quot;feature_results&quot;),
+  showWarnings = FALSE,
+  recursive = TRUE
 )</code></pre>
-<pre><code>## Rows: 384 Columns: 3419
-## ── Column specification ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-## Delimiter: &quot;,&quot;
-## chr    (2): Metadata_Well, Metadata_Chemical
-## dbl (3342): Metadata_Concentration, Metadata_Plate, AreaShape_Area_cells, AreaShape_BoundingBoxArea_cells, AreaShape_BoundingBoxMaximum_X_cells, Ar...
-## lgl   (75): AreaShape_EulerNumber_cells, Children_Cytoplasm_Count_cells, RadialDistribution_FracAtD_mito_tubeness_Overflow_cells, RadialDistributio...
-## 
-## ℹ Use `spec()` to retrieve the full column specification for this data.
-## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
-<pre class="r"><code>test_chem_well &lt;- as.data.frame(test_chem_well)
-variances &lt;- apply(test_chem_well, 2, var)</code></pre>
-<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
-## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
-<pre class="r"><code>variances[1:7] &lt;- 1
+<p>#Features</p>
+<pre class="r"><code># Reformat one test_chem_well-style data frame: collapse verbose CellProfiler
+# feature names into simplified category names and set Chemical_Conc_Well_Plate
+# as the row name. Wrapped as a function so it can be applied to every
+# feature-selected variant produced by the previous notebook.
+reformat_feature_names &lt;- function(test_chem_well) {
+
+test_chem_well &lt;- as.data.frame(test_chem_well)
+variances &lt;- apply(test_chem_well, 2, var)
+variances[1:4] &lt;- 1
 
 test_chem_well &lt;- test_chem_well[, variances != 0 &amp; !is.na(variances)]
 
@@ -522,7 +520,60 @@ rows &lt;- test_chem_well$Chemical
 rownames(test_chem_well) &lt;- rows
 
 test_chem_well &lt;- test_chem_well %&gt;%
-  dplyr::select(-Chemical)</code></pre>
+  dplyr::select(-Chemical)
+
+test_chem_well
+}
+
+# Loop over every feature-selected variant saved by the previous notebook
+# (test_chem_well.csv, test_chem_well_lowvariance.csv,
+#  test_chem_well_pearson_*.csv, test_chem_well_lowvar_pearson_*.csv, ...)
+# and write out a correspondingly-named, reformatted CSV.
+input_files &lt;- list.files(
+  pipeline_output_path,
+  pattern = &quot;^test_chem_well.*\\.csv$&quot;,
+  full.names = TRUE
+)
+
+walk(input_files, function(path) {
+  message(&quot;Reformatting: &quot;, basename(path))
+
+  df &lt;- read_csv(path, show_col_types = FALSE)
+  reformatted &lt;- reformat_feature_names(df)
+
+  out_name &lt;- str_replace(
+    basename(path),
+    &quot;^test_chem_well&quot;,
+    &quot;Well-level_data_simplified_categories&quot;
+  )
+
+  write.csv(
+    reformatted,
+    file.path(pipeline_output_path, &quot;feature_results&quot;, out_name),
+    row.names = TRUE
+  )
+})</code></pre>
+<pre><code>## Reformatting: test_chem_well_lowvariance.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well_pearson_0.5.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well_pearson_0.6.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well_pearson_0.7.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well_pearson_0.8.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well_pearson_0.9.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+<pre><code>## Reformatting: test_chem_well.csv</code></pre>
+<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
+## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
 
 
 

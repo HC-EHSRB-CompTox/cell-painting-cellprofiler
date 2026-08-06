@@ -345,80 +345,71 @@ gc()
 test_chem_well <- read_csv(
     file.path(pipeline_output_path, "test_chem_well.csv")
 )
-#Remove low variance features from pycytominer
-variance_threshold <- 1e-5
-metadata_cols <- 1:4   # first four columns are metadata
-feature_mat <- test_chem_well[, -(metadata_cols), drop = FALSE]
 
-variances <- matrixStats::colVars(as.matrix(feature_mat), na.rm = TRUE)
+# Split metadata from feature matrix
+is_metadata <- grepl("^Metadata_", names(test_chem_well))
+metadata_df <- test_chem_well[, is_metadata, drop = FALSE]
+feature_mat <- as.matrix(test_chem_well[, !is_metadata, drop = FALSE])
 
-keep_features <- !is.na(variances) & variances > variance_threshold ## 88 features that have NA values..
-
-feature_mat_var <- cbind(
-    test_chem_well[, metadata_cols],
-    feature_mat[, keep_features, drop = FALSE]
-)
-cat("Original features:", ncol(test_chem), "\n")
-cat("Remaining features:", ncol(test_chem_var), "\n")
-cat("Removed features:", sum(!keep_features), "\n")
-
-#Correlation thresholds from pycytominer (range)
-corr_thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
- corr_matrix <- cor(
-    feature_mat_var,
-    method = "pearson",
-    use = "pairwise.complete.obs")
-
-# Apply different thresholds
-corr_results <- lapply(corr_thresholds, function(thresh) {
-
-  remove <- findCorrelation(
-    corr_matrix,
-    cutoff = thresh,
-    exact = TRUE
-  )
-
-  test_chem_var[, -remove, drop = FALSE]
-})
-
-names(corr_results) <- paste0("corr_", corr_thresholds)
-
-sapply(corr_results, ncol)
-# Name results
-names(corr_results) <- paste0("pearson_", corr_thresholds)
-removed_features <- lapply(corr_thresholds, function(thresh) {
-  corr_matrix <- cor(
-    test_chem_var,
-    method = "pearson",
-    use = "pairwise.complete.obs"
-  )
-  remove <- findCorrelation(
-    corr_matrix,
-    cutoff = thresh,
-    exact = TRUE
-  )
-  colnames(test_chem_var)[remove]
-})
-
-names(removed_features) <- paste0("pearson_", corr_thresholds)
+n_features_original <- ncol(feature_mat)
 ```
 
-#Saving
+##1. Low-variance filter
 ```{r}
-print("Saving well-level data as .csv files")
+# Drop features with (near-)zero variance across wells
+variance_threshold <- 1e-5
 
-#write_csv(test_chem, file.path(pipeline_output_path, "test_chem.csv"))
+variances <- matrixStats::colVars(feature_mat, na.rm = TRUE)
+keep_var  <- !is.na(variances) & variances > variance_threshold
 
-#saveRDS(
-#test_chem_cc,
-#file.path(pipeline_output_path, "test_chem_cc.rds")
-#)
+cat("Original features:", n_features_original, "\n")
+cat("Removed (low variance or all-NA):", sum(!keep_var), "\n")
+cat("Remaining after variance filter:", sum(keep_var), "\n")
 
-write_csv(test_chem_well, file.path(pipeline_output_path,"test_chem_well_lowvarience.csv"))
+feature_mat_lowvar <- feature_mat[, keep_var, drop = FALSE]
 
-rm()
-gc()
+test_chem_well_lowvar <- bind_cols(metadata_df, as.data.frame(feature_mat_lowvar))
+
+write_csv(test_chem_well_lowvar, file.path(pipeline_output_path, "test_chem_well_lowvariance.csv"))
 ```
+
+##2. Pearson correlation filter (pycytominer-style), multiple cutoffs
+```{r}
+# pycytominer's correlation_threshold flags pairs of features correlated
+# above `corr_threshold` and, for each flagged pair, drops the member with
+# the larger total (summed) correlation to all other features, keeping the
+# one with lower overall redundancy. caret::findCorrelation(exact = TRUE)
+# implements this same iterative "sum of correlations" ranking rule, but its
+# per-removal recomputation does not scale to ~3400 features (a single
+# cutoff did not finish in 2 minutes). exact = FALSE uses a one-pass average
+# absolute correlation computed once from the full matrix -- much faster,
+# at the cost of not recomputing after each removal.
+corr_thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
+
+# Correlation-only filter, applied to ALL features (no prior variance filtering)
+corr_matrix_all <- cor(feature_mat, method = "pearson", use = "pairwise.complete.obs")
+
+n_na_corr <- sum(is.na(corr_matrix_all))
+if (n_na_corr > 0) {
+  message(n_na_corr, " NA entries in the correlation matrix (likely constant/all-NA features) set to 0 before filtering")
+  corr_matrix_all[is.na(corr_matrix_all)] <- 0
+}
+
+corr_only_results <- lapply(corr_thresholds, function(thresh) {
+  remove <- findCorrelation(corr_matrix_all, cutoff = thresh, exact = FALSE)
+  bind_cols(metadata_df, as.data.frame(feature_mat[, -remove, drop = FALSE]))
+})
+names(corr_only_results) <- paste0("pearson_", corr_thresholds)
+
+# Features retained at each cutoff
+sapply(corr_only_results, ncol) - ncol(metadata_df)
+
+iwalk(corr_only_results, function(df, name) {
+  write_csv(df, file.path(pipeline_output_path, paste0("test_chem_well_", name, ".csv")))
+})
+```
+
+
 
 #Plotting
 ```{r}
