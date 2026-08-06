@@ -5,291 +5,257 @@ library(factoextra)
 library(tcplfit2)
 library(ggrepel)
 library(cowplot)
+
+dir.create(
+  file.path(pipeline_output_path, "tcplfit_results_cat"),
+  showWarnings = FALSE,
+  recursive = TRUE
+)
 ```
 
 #Category level Principal component analysis, Mahalanobis distance calculations, and Concentration-response analysis
 ```{r}
-#Load in from sheet 2 so feature names are correct
-test_chem_well <- read_csv(
-  file.path(pipeline_output_path, "Well-level_data_simplified_categories.csv")
+# Discover all Well-level simplified CSV files produced by sheet 2
+simplified_files <- list.files(
+  file.path(pipeline_output_path, "feature_results"),
+  pattern = "^Well-level_data_simplified_categories.*\\.csv$",
+  full.names = TRUE
 )
 
-# Move first column to row names
-test_chem_well <- as.data.frame(test_chem_well)
-rownames(test_chem_well) <- test_chem_well[[1]]
-test_chem_well <- test_chem_well[, -1]
+message("Found ", length(simplified_files), " feature-set files to process (category-level).")
 
-#Transpose
-test_chem_well_cat <- t(test_chem_well)
-test_chem_well_cat <- as.data.frame(test_chem_well_cat)
+walk(simplified_files, function(path) {
 
-test_chem_well_cat <- cbind(ft_colnames2, test_chem_well_cat)
-rownames(test_chem_well_cat) <- NULL
+  # --- Label for output file names ---
+  file_label <- basename(path) |>
+    stringr::str_remove("^Well-level_data_simplified_categories") |>
+    stringr::str_remove("\\.csv$")
 
-#Filter out categories with fewer than 2 features
-cat_lev_data <- test_chem_well_cat %>%
-  group_by(features) %>%
-  mutate(count = n()) %>%
-  ungroup() %>%
-  filter(count > 1)
+  if (file_label == "") file_label <- "_all_features"
 
-cat_lev_data <- cat_lev_data[,-c(ncol(cat_lev_data))]
+  message("\n=== Processing (category-level): ", basename(path), " ===")
 
-#Create a list of categories with more than 2 features (ft_cats)
-samples <- colnames(cat_lev_data)[2:ncol(cat_lev_data)]
-ft_cats <- unique(cat_lev_data$features)
+  # --- Load data ---
+  test_chem_well <- read_csv(path, show_col_types = FALSE) |>
+    as.data.frame()
+  rownames(test_chem_well) <- test_chem_well[[1]]
+  test_chem_well <- test_chem_well[, -1]
 
-#Eliminate categories with no variance across samples
+  # well_data mirrors test_chem_well (samples x features) — needed later
+  # for the raw (non-PCA-space) Mahalanobis calc, same as in the original script
+  well_data <- test_chem_well
 
-cat_lev_data <- lapply(ft_cats, function(x){
-  cat_dat <- well_data[, grep(x, colnames(well_data))]
-  variances <- apply(cat_dat, 2, var)
-  cat_dat <- cat_dat[, variances != 0] 
-  cat_dat
-  }) %>%
-  do.call(cbind,.)
+  # --- Transpose & attach category labels ---
+  test_chem_well_cat <- t(test_chem_well) |> as.data.frame()
 
-#PCA by category
-pca_cat <- lapply(ft_cats, function(x){
-  cat_dat <- cat_lev_data[, grep(x, colnames(cat_lev_data))]
-  pca <- prcomp(cat_dat, center = TRUE, scale = TRUE)
-  return (pca)
-}) %>%
-  setNames(ft_cats)
+  # Capture feature names as ft_colnames2 before clearing row names,
+  # so they can be cbound back in as the "features" column
+  ft_colnames2 <- rownames(test_chem_well_cat)
 
-#Category Mahalanobis distances
+  test_chem_well_cat <- cbind(ft_colnames2, test_chem_well_cat)
+  rownames(test_chem_well_cat) <- NULL
+  # --- Filter out categories with fewer than 2 features ---
+  cat_lev_data <- test_chem_well_cat |>
+    dplyr::group_by(features) |>
+    dplyr::mutate(count = n()) |>
+    dplyr::ungroup() |>
+    dplyr::filter(count > 1)
 
-cat_mahal_dist <- lapply(ft_cats, function(x){
-  
-  pca <- pca_cat[[x]]
-  
-  cumulative_prop <- cumsum(pca$sdev^2)/sum(pca$sdev^2)
-  PC_95 <- length(which(cumulative_prop<0.95))+1
-  
-  pca_x <- as.data.frame(pca$x)
-  pca_x <- as.data.frame(cbind(chem = samples, pca_x)) 
-  
-  ctrl_pc <- pca_x %>% filter(grepl(ctrl_group, chem))
-  ctrl_pc <- ctrl_pc[,-c(1)]
-  ctrl_mean <- colMeans(ctrl_pc)
-  
-  cat_dat <- well_data[, grep(x, colnames(well_data))]
-  zero_col <- sapply(cat_dat, function(col) all(col == 0))
-  cat_dat <- cat_dat[,!zero_col]
-  
-  dat <- as.matrix(cat_dat) %*% pca$rotation[,1:PC_95]
-  
-  #Covariance Matrix
-  Cov <- cov(dat)
-  
-  #Checkpoint
-  det(Cov)
-  isSymmetric(Cov)
-  
-  #Mahalanobis distance determination
-  
-  mahal_dist <- mahalanobis(dat, ctrl_mean, Cov, inverted = F) 
-  
-  mahal_dist <- as.data.frame(mahal_dist)
-  
-  mahal_dist <- cbind(chem = rownames(well_data), mahal_dist)
-  
-  sample_info <- mahal_dist$chem
-  sample_info <- tibble(sample_info) %>%
-    separate(sample_info, c("chem", "concentration", "well", "well2"), sep = "_", remove = T)
-  
-  sample_info$well <- paste0(sample_info$well, "_", sample_info$well2)
-  
-  mahal_dist <- cbind(sample_info[1:3], mahal_dist = mahal_dist$mahal_dist)
-  
-  return(mahal_dist)
-  }) %>%
-  setNames(ft_cats)
+  cat_lev_data <- cat_lev_data[, -ncol(cat_lev_data)]
 
-chem_list <- unique(cat_mahal_dist[[1]][["chem"]])
+  samples <- colnames(cat_lev_data)[2:ncol(cat_lev_data)]
+  ft_cats <- unique(cat_lev_data$features)
 
-# Separate categorical Mahalanobis distances by chemical
-mahal_dist_chem <- lapply(chem_list, function(x){
-  chemical <- x
-  
-  chem_dat <- lapply(ft_cats, function(y){
-    chem_dat <- filter(cat_mahal_dist[[y]], chem == chemical)
-    return(chem_dat)}) %>%
-    setNames(ft_cats)
-  
-  chem_dat <- do.call(rbind, chem_dat)
-  
-  return(chem_dat)}) %>%
-  setNames(chem_list) %>%
-  do.call(rbind, .)
+  # --- PCA by category ---
+  pca_cat <- lapply(ft_cats, function(x) {
+    cat_dat <- cat_lev_data[, grep(x, colnames(cat_lev_data))]
+    prcomp(cat_dat, center = TRUE, scale = TRUE)
+  }) |> setNames(ft_cats)
 
-mahal_dist_chem$feat <- rownames(mahal_dist_chem)
-mahal_dist_chem$feat <- str_extract(mahal_dist_chem$feat, "(?<=\\.).*?(?=\\.)")
-rownames(mahal_dist_chem) <- NULL
-```
-#Plot Mahalanobis distances 
-```{r}
-lapply(chem_list, function(x){
+  # --- Category Mahalanobis distances ---
+  cat_mahal_dist <- lapply(ft_cats, function(x) {
 
-  plot <- ggplot(
-    mahal_dist_chem[mahal_dist_chem$chem == x,],
-    aes(x = as.numeric(concentration),
-        y = mahal_dist,
-        colour = feat)
-  ) +
-    geom_point() +
-    scale_y_continuous() +
+    pca <- pca_cat[[x]]
+
+    cumulative_prop <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
+    PC_95 <- length(which(cumulative_prop < 0.95)) + 1
+
+    pca_x <- as.data.frame(pca$x)
+    pca_x <- as.data.frame(cbind(chem = samples, pca_x))
+
+    ctrl_pc <- pca_x |> dplyr::filter(grepl(ctrl_group, chem))
+    ctrl_pc <- ctrl_pc[, -1]
+    ctrl_mean <- colMeans(ctrl_pc)
+
+    cat_dat <- well_data[, grep(x, colnames(well_data))]
+    zero_col <- sapply(cat_dat, function(col) all(col == 0))
+    cat_dat <- cat_dat[, !zero_col]
+
+    dat <- as.matrix(cat_dat) %*% pca$rotation[, 1:PC_95]
+    Cov <- cov(dat)
+
+    mahal_dist <- mahalanobis(dat, ctrl_mean, Cov, inverted = FALSE)
+    mahal_dist <- as.data.frame(mahal_dist)
+    mahal_dist <- sqrt(mahal_dist)
+
+    mahal_dist <- cbind(chem = rownames(well_data), mahal_dist)
+
+    sample_info <- tibble::tibble(sample_info = mahal_dist$chem) |>
+      tidyr::separate(sample_info, c("chem", "concentration", "well", "well2"),
+                       sep = "_", remove = TRUE)
+    sample_info$well <- paste0(sample_info$well, "_", sample_info$well2)
+
+    cbind(sample_info[1:3], mahal_dist = mahal_dist$mahal_dist)
+  }) |> setNames(ft_cats)
+
+  chem_list <- unique(cat_mahal_dist[[1]][["chem"]])
+
+  # --- Separate categorical Mahalanobis distances by chemical ---
+  mahal_dist_chem <- lapply(chem_list, function(x) {
+    chem_dat <- lapply(ft_cats, function(y) {
+      dplyr::filter(cat_mahal_dist[[y]], chem == x)
+    }) |> setNames(ft_cats)
+    do.call(rbind, chem_dat)
+  }) |> setNames(chem_list) |> do.call(rbind, args = _)
+
+  mahal_dist_chem$feat <- rownames(mahal_dist_chem)
+  mahal_dist_chem$feat <- stringr::str_extract(mahal_dist_chem$feat, "(?<=\\.).*?(?=\\.)")
+  rownames(mahal_dist_chem) <- NULL
+
+  # --- Per-chemical Mahalanobis plots (kept off by default, same as script 1's per-plate plots) ---
+  lapply(chem_list, function(x) {
+    p <- ggplot(
+      mahal_dist_chem[mahal_dist_chem$chem == x, ],
+      aes(x = as.numeric(concentration), y = mahal_dist, colour = feat)
+    ) +
+      geom_point() +
+      scale_y_continuous() +
+      scale_x_log10() +
+      scale_color_manual(values = turbo(333)) +
+      xlab("Concentration (\u03BCM)") + ylab("Mahalanobis Distance") +
+      theme_classic() +
+      theme(
+        legend.position = "none",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+        axis.title.y = element_text(size = 20, margin = margin(r = 15), angle = 90),
+        axis.text.x = element_text(size = 11, colour = "black"),
+        axis.text.y = element_text(size = 11, colour = "black"),
+        strip.text.x = element_text(size = 12, face = "bold"),
+        strip.background = element_rect(fill = NA),
+        axis.line = element_line(linewidth = 1)
+      ) +
+      facet_wrap(vars(feat), scales = "free") +
+      ggtitle(paste0(x, file_label))
+
+    # ggsave(
+    #   filename = file.path(plots, paste0(x, file_label, "_Categorical_mahalanobis.png")),
+    #   plot = p, width = 45, height = 45, units = "cm"
+    # )
+  })
+
+  # --- tcplfit2 concentration-response modeling per category ---
+  mahal_dist_chem <- as.data.frame(mahal_dist_chem)
+
+  test_chem_res <- mahal_dist_chem |> dplyr::filter(chem != ctrl_group)
+
+  conc_res_modeling <- function(test_chem, vehicle_ctrl) {
+    row <- list(
+      conc   = as.numeric(test_chem$concentration),
+      resp   = test_chem$mahal_dist,
+      bmed   = vehicle_ctrl$Median,
+      cutoff = vehicle_ctrl$nMad,
+      onesd  = vehicle_ctrl$nMad,
+      name   = paste0(test_chem$chem[1], "_", test_chem$feat[1]),
+      assay  = "Mahalanobis distance (cutoff = 1)"
+    )
+    tcplfit2::concRespCore(
+      row, conthits = TRUE, aicc = TRUE, force.fit = FALSE, bidirectional = TRUE,
+      fitmodels = c("cnst", "hill", "poly1", "poly2", "pow", "exp2", "exp3", "exp4", "exp5")
+    )
+  }
+
+  chem_list_i <- unique(test_chem_res$chem)
+  feats <- unique(test_chem_res$feat)
+
+  vehicle_ctrl <- mahal_dist_chem |>
+    dplyr::filter(chem == ctrl_group) |>
+    dplyr::summarise(
+      Median = median(mahal_dist, na.rm = TRUE),
+      nMad   = mad(mahal_dist, constant = 1.4826, na.rm = TRUE)
+    )
+
+  tcpl_results_cat_i <- lapply(chem_list_i, function(x) {
+    chem_data <- test_chem_res[test_chem_res$chem == x, ]
+
+    lapply(feats, function(y) {
+      chem_data_y <- chem_data |> dplyr::filter(grepl(y, feat))
+      conc_res_modeling(chem_data_y, vehicle_ctrl)
+
+      # Individual feature concentration-response curves — off by default
+      # concRespPlot(tcpl_chem, ymin = min(chem_data_y$mahal_dist) - 5,
+      #              ymax = max(chem_data_y$mahal_dist) + 10, draw.error.arrows = FALSE)
+    }) |> do.call(rbind, args = _)
+  }) |> do.call(rbind, args = _)
+
+  split_col <- stringr::str_split_fixed(tcpl_results_cat_i$name, "_", 2)
+  tcpl_results_cat_i <- cbind("chem" = split_col[, 1], "feat" = split_col[, 2], tcpl_results_cat_i[, -1])
+
+  tcpl_results_cat_i <- tcpl_results_cat_i |>
+    dplyr::mutate(
+      minDose = min(conc, na.rm = TRUE),
+      maxDose = max(conc, na.rm = TRUE),
+      removal_reason = dplyr::case_when(
+        hitcall < 0.9   ~ "low_hitcall",
+        is.na(bmdl)     ~ "missing_bmdl",
+        is.na(bmdu)     ~ "missing_bmdu",
+        TRUE            ~ "kept"
+      ),
+      keep = removal_reason == "kept",
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA)
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::filter(er < 0.99)
+
+  tcpl_results_cat_i$exp_name <- exp_name
+
+  # --- BMC plot ---
+  BMC_plot <- ggplot(tcpl_results_cat_i, aes(x = bmd, y = feat, colour = feat)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
     scale_x_log10() +
-    scale_color_manual(values = turbo(333)) +
-    xlab("Concentration (\u03BCM)") +
-    ylab("Mahalanobis Distance") +
-    theme_classic() +
+    xlab("Best BMC (1MAD above vehicle control median) \u03BCM") +
+    ylab("Feature Category") +
+    theme_bw() +
     theme(
       legend.position = "none",
-      axis.title.x = element_text(size = 20, margin = margin(t = 15)),
-      axis.title.y = element_text(size = 20, margin = margin(r = 15), angle = 90),
-      axis.text.x = element_text(size = 11, colour = "black"),
-      axis.text.y = element_text(size = 11, colour = "black"),
+      axis.title.x = element_text(size = 17, margin = margin(t = 20)),
+      axis.title.y = element_text(size = 17),
+      axis.text.x  = element_text(size = 12, colour = "black"),
+      axis.text.y  = element_text(size = 6, colour = "black", margin = margin(r = 5)),
       strip.text.x = element_text(size = 12, face = "bold"),
       strip.background = element_rect(fill = NA),
-      axis.line = element_line(linewidth = 1)
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
     ) +
-    facet_wrap(vars(feat), scales = "free")
+    facet_wrap(vars(chem)) +
+    ggtitle(paste0("Categorical BMC — ", file_label))
 
   ggsave(
-    filename = file.path(plots, paste0(x, "_Categorical_mahalanobis.png")),
-    plot = plot,
-    width = 45,
-    height = 45,
- units = "cm"
+    filename = file.path(plots, paste0("Categorical_BMC", file_label, ".png")),
+    plot = BMC_plot, width = 25, height = 35, units = "cm"
   )
 
+  # --- Save tcpl results table ---
+  write_csv(
+    tcpl_results_cat_i,
+    file.path(
+      pipeline_output_path, "tcplfit_results_cat",
+      paste0("tcpl_results_cat", file_label, ".csv")
+    )
+  )
+
+  message("Done (category-level): ", basename(path))
 })
-```
-
-
-#Tcplfit2
-```{r}
-#Concentration-response modeling of each category
-mahal_dist_chem <- as.data.frame(mahal_dist_chem)
-
-test_chem_res <- mahal_dist_chem %>%
-  filter(chem != ctrl_group)
-
-#####Tcplfit2 to derive benchmark concentrations#####
-
-#Function to model concentration-response using concRespCore function in tcplfit2
-conc_res_modeling <- function(test_chem, vehicle_ctrl){ 
-  
-  row <- list(conc = as.numeric(test_chem$concentration),
-              resp = test_chem$mahal_dist,
-              bmed = vehicle_ctrl$Median,
-              cutoff = vehicle_ctrl$nMad,
-              onesd = vehicle_ctrl$nMad,
-              name = paste0(test_chem$chem[1], "_",test_chem$feat[1]),
-              assay = "Mahalanobis distance (cutoff = 1)")
-  
-  concRespCore(row, conthits = TRUE, aicc = TRUE, force.fit = FALSE,  bidirectional = TRUE,
-               fitmodels=c("cnst", "hill", "poly1", "poly2", "pow", "exp2", "exp3","exp4", "exp5"))
-}
-
-
-
-chem_list <- unique(test_chem_res$chem)
-
-feats <- unique(test_chem_res$feat)
-
-vehicle_ctrl <- mahal_dist_chem %>%
-  filter(chem == ctrl_group) %>%
-  summarise(Median = median(mahal_dist, na.rm=T), 
-            nMad = mad(mahal_dist, constant=1.4826, na.rm=T))
-
-#tcplfit2
-tcpl_results_cat <- lapply(chem_list, function(x){
-  
-  chem_data <- test_chem_res[test_chem_res$chem == x,]
-  
-  tcpl_results <- lapply(feats, function(y){
-    chem_data <- chem_data %>%
-      filter(grepl(y, feat))
-    tcpl_chem <- conc_res_modeling(chem_data, vehicle_ctrl)
-    
-    #Individual feature concentration-response curves
-    #concRespPlot(tcpl_chem, ymin= min(chem_data$mahal_dist)-5, ymax=max(chem_data$mahal_dist)+10,  draw.error.arrows = FALSE)
-  
-    tcpl_chem
-    }) %>%
-    do.call(rbind,.)
-
-  return(tcpl_results)
-  }) %>%
-  do.call(rbind,.)
-
-#split name column into chemical name and feature name
-split_col <- str_split_fixed(tcpl_results_cat$name, "_", 2)
-tcpl_results_cat <- cbind("chem"=split_col[,1], "feat"=split_col[,2], tcpl_results_cat[,-1])
-
-####BMC filtering criteria
-#Eliminate BMCs without ACC and BMCU/BMCL
-
-tcpl_results_cat <- tcpl_results_cat %>%
-  mutate(
-    minDose = min(conc, na.rm = TRUE),
-    maxDose = max(conc, na.rm = TRUE),
-
-    removal_reason = case_when(
-      hitcall < 0.9            ~ "low_hitcall",
-      is.na(bmdl)              ~ "missing_bmdl",
-      is.na(bmdu)              ~ "missing_bmdu",
-     # bmd < minDose            ~ "bmd_below_minDose",
-      #bmd > maxDose            ~ "bmd_above_maxDose",
-      TRUE                     ~ "kept"
-    ),
-
-    keep = removal_reason == "kept",
-
-    bmd  = ifelse(keep, bmd, NA),
-    bmdl = ifelse(keep, bmdl, NA),
-    bmdu = ifelse(keep, bmdu, NA)
-  ) %>%
-  ungroup()
-#Model error parameter cutoff
-
-tcpl_results_cat <- tcpl_results_cat %>%
-  filter(er<0.99) 
-
-tcpl_results_cat$exp <- exp_name
-
-chem <- paste(unique(tcpl_results_cat$chem), collapse ="_")
-
-
-#Plot all BMC, BMCU, and BMCL together
-BMC_plot <- ggplot(tcpl_results_cat, aes(x=bmd, y=feat, colour=feat)) +
-  geom_point(size=3) +
-  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
-  scale_x_log10() +
-  xlab("Best BMC (1MAD above vehicle control median) \u03BCM") +
-  ylab("Feature Category") +
-  theme_bw() +
-  theme(legend.position="none",
-        axis.title.x = element_text(size = 17, margin = margin(t=20)),
-        axis.title.y = element_text(size = 17),
-        axis.text.x = element_text(size = 12, colour = "black"),
-        axis.text.y = element_text(size = 6, colour = "black",margin=margin(r=5)),
-        strip.text.x = element_text(size = 12, face = "bold"),
-        strip.background =element_rect(fill=NA),
-        panel.border = element_rect(color = 'black', 
-                                    fill = NA, 
-                                    linewidth = 1)) +
-  facet_wrap(vars(chem))
-  
-BMC_plot
-
-ggsave(filename = file.path(plots, "Categorical BMC_testchems.png"), 
-       plot = BMC_plot, 
-       width = 25, height = 35, units = "cm")
-#Save tcpl results
-write_csv(tcpl_results_cat, file = paste0(pipeline_output_path,exp_name,"_", ctrl_group,"_Category Mahalanobis - tcplResult.csv"))
-
 ```
 

@@ -196,8 +196,9 @@ dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/3_Global PCA and Mahalnobis distances.rmd")
 
 #### 4. Categorical Mahalanobis distance calculation and BMC analysis
-#plots <- "../Plots/rep3/Catagorical"
-#dir.create(plots, recursive = TRUE, showWarnings = FALSE)
-#rmarkdown::render("../Processing_Notebooks/4_Category PCA and Mahalanobis distances.rmd")
+plots <-"../Plots/rep2/Mal_sqrt/"
+dir.create(plots, recursive = TRUE, showWarnings = FALSE)
+rmarkdown::render("../Processing_Notebooks/4_Category PCA and Mahalanobis distances.rmd")
 ```
+
 
