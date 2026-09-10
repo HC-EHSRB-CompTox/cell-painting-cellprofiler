@@ -8,22 +8,22 @@ library(readxl)
 #Paths and info
 ```{r}
 #change things here depedning on experiment 
-image_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/raw images/"
+image_path <- "/Users/compt/SynologyDrive/U2-OS definitive experiment/U2OS rep1/raw images/"
 #Plate Map Info 
-cell_profiler_input_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/Input/"
+cell_profiler_input_path <- "/Users/compt/SynologyDrive/U2-OS definitive experiment/U2OS rep1/Input/"
   
-metadata_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/metadata/"
+metadata_path <- "/Users/compt/SynologyDrive/U2-OS definitive experiment/U2OS rep1/metadata/"
 dir.create(metadata_path, recursive = TRUE, showWarnings = FALSE)
 
 #Create a folder path to find .csv files from cell profiler
-cell_profiler_process_path <- "/data/SynologyDrive/U2-OS definitive experiment/U2OS rep2/Output/"
+cell_profiler_process_path <- "/Users/compt/SynologyDrive/U2-OS definitive experiment/U2OS rep1/Output/"
 
-pipeline_output_path <- "/data/cell-painting-cellprofiler/Output/rep2/"
+pipeline_output_path <- "/Users/compt/OneDrive/Documents/cell-painting-cellprofiler/Output/rep1/"
 dir.create(pipeline_output_path, recursive = TRUE, showWarnings = FALSE)
 
 
 #Create experiment name (for labeling files)
-exp_name <- paste("rep2")
+exp_name <- paste("rep1")
 ctrl_group <- "DMSO"
 
 ```

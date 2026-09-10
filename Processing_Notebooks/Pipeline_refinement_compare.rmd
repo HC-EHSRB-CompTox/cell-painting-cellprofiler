@@ -83,7 +83,7 @@ plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
   )
 
 plot
-ggsave("../Plots/sqrt_bmd_results.png", plot, width = 20, height = 60,units = "cm")
+ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
 ```
 
 ##Load Columbus results
@@ -138,7 +138,7 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = is_sqrt, shape = source))
   )
 
 plot
-ggsave("../Plots/sqrt_bmd_results_columbus_cellprofiler.png", plot, width = 20, height = 60,units = "cm")
+ggsave("../Plots/sqrt_bmd_results_columbus_cellprofiler.png", plot, width = 15, height = 10,units = "cm")
 ```
 
 #New analysis comparision
@@ -225,7 +225,40 @@ plot <- ggplot(all_results, aes(x = bmd, y = name, colour = pearson_thresh)) +
   scale_x_log10() +
   scale_colour_viridis_c(na.value = "red") +
   theme_bw() +
-  facet_wrap(~exp) +
+  facet_wrap(~exp)+
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+
+# Average across reps (exp) within each chemical / pearson_thresh cutoff, so
+# each name x pearson_thresh combo collapses to a single point.
+all_results_avg <- all_results %>%
+  group_by(name, pearson_thresh) %>%
+  summarise(
+    n_reps = sum(!is.na(bmd)),
+    bmd = mean(bmd, na.rm = TRUE),
+    bmdl = mean(bmdl, na.rm = TRUE),
+    bmdu = mean(bmdu, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # mean() of all-NA groups yields NaN; keep these as NA
+  mutate(across(c(bmd, bmdl, bmdu), ~ ifelse(is.nan(.x), NA, .x)))
+
+plot <- ggplot(all_results_avg, aes(x = bmd, y = name, colour = pearson_thresh)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_colour_viridis_c(na.value = "red") +
+  theme_bw() +
   theme(
     legend.position = "right",
     axis.title.x = element_text(size = 13, margin = margin(t = 15)),

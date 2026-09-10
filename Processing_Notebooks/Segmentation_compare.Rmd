@@ -94,12 +94,12 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
     axis.text.x = element_text(size = 10, colour = "black"),
     axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
     strip.text.x = element_text(size = 9, face = "bold"),
-    strip.background = element_rect(fill = NA),
+    strip.background = element_rect(fill = NA), 
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
 
 plot
-ggsave("../Plots/combined_nosqrt.png", plot, width = 60, height = 60,units = "cm")
+ggsave("../Plots/combined_nosqrt.png", plot, width = 15, height = 10,units = "cm")
 ```
 
 
