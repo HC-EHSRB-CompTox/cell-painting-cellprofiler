@@ -382,6 +382,11 @@ write_csv(test_chem_well_lowvar, file.path(pipeline_output_path, "test_chem_well
 # the larger total (summed) correlation to all other features, keeping the
 # one with lower overall redundancy. caret::findCorrelation(exact = TRUE)
 
+# pycytominer's correlation_threshold flags pairs of features correlated
+# above `corr_threshold` and, for each flagged pair, drops the member with
+# the larger total (summed) correlation to all other features, keeping the
+# one with lower overall redundancy. caret::findCorrelation(exact = TRUE)
+
 corr_thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
 
 # Correlation-only filter, applied to ALL features (no prior variance filtering)
@@ -393,191 +398,34 @@ if (n_na_corr > 0) {
   corr_matrix_all[is.na(corr_matrix_all)] <- 0
 }
 
-corr_only_results <- lapply(corr_thresholds, function(thresh) {
-  remove <- findCorrelation(corr_matrix_all, cutoff = thresh, exact = FALSE)
-  bind_cols(metadata_df, as.data.frame(feature_mat[, -remove, drop = FALSE]))
-})
-names(corr_only_results) <- paste0("pearson_", corr_thresholds)
+# For each threshold, compute retained + removed feature sets
+corr_results <- map(corr_thresholds, function(thresh) {
+  remove_idx <- findCorrelation(corr_matrix_all, cutoff = thresh, exact = FALSE)
 
-# Features retained at each cutoff
-sapply(corr_only_results, ncol) - ncol(metadata_df)
-
-iwalk(corr_only_results, function(df, name) {
-  write_csv(df, file.path(pipeline_output_path, paste0("test_chem_well_", name, ".csv")))
+  list(
+    retained = bind_cols(metadata_df, as.data.frame(feature_mat[, -remove_idx, drop = FALSE])),
+    removed  = bind_cols(metadata_df, as.data.frame(feature_mat[, remove_idx, drop = FALSE]))
+  )
 })
+names(corr_results) <- paste0("pearson_", corr_thresholds)
+
+# The "no threshold" variant only needs to be written once (doesn't depend on cutoff)
+corr_none <- bind_cols(metadata_df, as.data.frame(feature_mat))
+
+# Feature counts retained at each cutoff
+sapply(corr_results, function(x) ncol(x$retained)) - ncol(metadata_df)
+
+# Write retained + removed files for each threshold
+iwalk(corr_results, function(res, name) {
+  write_csv(res$retained, file.path(pipeline_output_path, paste0("test_chem_well_", name, ".csv")))
+  write_csv(res$removed,  file.path(pipeline_output_path, paste0("test_chem_well_", name, "_removed.csv")))
+})
+
+# Write the single "no threshold" file
+write_csv(corr_none, file.path(pipeline_output_path, "test_chem_well_pearson_none.csv"))
 ```
 
-#TESTING
-```{r}
-#Define the plate combinations to run once instead of repeating the block
-#above manually for each one
-plate_combos <- list(
-  plate1     = "1",
-  `plate1-2` = c("1", "2"),
-  `plate1-3` = c("1", "2", "3"),
-  `plate1-4` = c("1", "2", "3", "4")
-)
 
-#exp_name should now be the base experiment label without a plate suffix
-#(e.g. "rep1"), since the plate suffix is appended per combination below
-all_combo_feat <- imap(plate_combos, function(plate_nos, label) {
-  process_plate_combo(plate_nos, paste0(exp_name, "_", label))
-})
-names(all_combo_feat) <- paste0(exp_name, "_", names(plate_combos))
-
-###############################################################
-
-#Venn diagram of retained features across plate combinations, one per
-#correlation cutoff (0.5-0.9), saved as separate .jpeg files
-#Each element of all_combo_feat is a named list with entries "feat_0.5",
-#..., "feat_0.9" -- iterate over those names (not the raw numeric
-#thresholds) so `.x[[co]]` matches by name instead of falling back to
-#positional indexing.
-
-library(ggVennDiagram)
-
-cutoffs <- paste0("feat_", corr_thresholds)
-
-venn_plots <- map(cutoffs, function(co) {
-  venn_sets <- map(all_combo_feat, ~ .x[[co]])
-  cutoff_label <- str_remove(co, "feat_")
-
-  p <- ggVennDiagram(venn_sets, label_alpha = 0) +
-    scale_fill_gradient(low = "white", high = "steelblue") +
-    scale_x_continuous(expand = expansion(mult = 0.15)) +
-    labs(title = paste0("Retained features at Pearson cutoff ", cutoff_label))
-
-  ggsave(filename = file.path(new_dir, paste0(exp_name, "_", cutoff_label, ".jpeg")), p,
-         height = 8, width = 13)
-
-  p
-})
-names(venn_plots) <- cutoffs
-
-venn_plots[["feat_0.9"]]
-
-####################################################################
-rep1_plate1_4_feat <- readRDS("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep1_plate1-4_feat.rds")
-rep2_plate1_4_feat <- readRDS("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep2_plate1-4_feat.rds")
-rep3_plate1_4_feat <- readRDS("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep3_plate1-4_feat.rds")
-
-rep_venn_sets <- list(
-  rep1_0.9 = `rep1_plate1_4_feat`$feat_0.9,
-  rep2_0.9 = rep2_plate1_4_feat$feat_0.9,
-  rep3_0.9 = rep3_plate1_4_feat$feat_0.9
-)
-
-sapply(rep_venn_sets, length)
-
-a <- ggVennDiagram(rep_venn_sets, label_alpha = 0) +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  scale_x_continuous(expand = expansion(mult = 0.15)) +
-  labs(title = "Retained features (pooled plates 1-4) at Pearson cutoff 0.9, by replicate")
-
-ggsave(filename = file.path(new_dir, paste0("overlapping features at 0.9.jpeg")), a,
-       height = 8, width = 13)
-
-
-#Shared feats
-
-shared_feats <- data.frame(features = Reduce(intersect, rep_venn_sets))
-length(shared_feats$features)
-
-removed_feats <-data.frame(features = colnames(df)[-(1:4)]) %>%
-  filter(!(features %in% shared_feats$features))
-
-str_replace(feats$features, "nuclei", "Nucleus")
-str_replace(feats$features, "Nuclei", "Nucleus")
-
-#Reformat feat names
-module <- c("Shape", "position", "Position", "Axial","Compactness","Radial","Symmetry", "Gabor", "Haralick", "SER", "Intensity","intensity","Profile","Ratio", "Length", "Width", "Roundness", "Area", "position", "Position")
-region <- c("Nuclei", "nuclei","Cell", "Nucleus", "Cytoplasm", "Cyto", "Membrane", "Ring")
-channel <- c("AGP", "Mito", "DNA", "RNA", "ER")
-
-shared_feats$region <- str_match(shared_feats$features, paste(region, collapse = "|"))
-shared_feats$channel <- str_match(shared_feats$features, paste(channel, collapse = "|"))
-shared_feats$module <- str_match(shared_feats$features, paste(module, collapse = "|"))
-
-#Combine Gabor, Haralick, and SER in the Texture module
-shared_feats['module'][shared_feats['module']=="Gabor"|shared_feats['module']=="Haralick"|shared_feats['module']=="SER"] <- "Texture"
-shared_feats['module'][shared_feats['module']=="Ratio"|shared_feats['module']=="Length"|shared_feats['module']=="Width"|shared_feats['module']=="Roundness"|shared_feats['module']=="Area"] <- "Morph"
-shared_feats['region'][shared_feats['region']=="nuclei"] <- "Nucleus"
-shared_feats['region'][shared_feats['region']=="Nuclei"] <- "Nucleus"
-
-library(tidyverse)
-
-shared_feats <- shared_feats %>%
-  mutate(region = as.character(region), channel = as.character(channel), module = as.character(module))
-
-# 1) Region breakdown
-region_counts <- shared_feats %>% count(region)
-
-ggsave("Feature_breakdown_Removed_feats.jpeg",
-       ggplot(region_counts, aes(x = "", y = n, fill = region)) +
-  geom_col(width = 1) +
-  coord_polar(theta = "y") +
-  labs(title = "Region breakdown of features", x = NULL, y = NULL),
-  
-  height = 6, width = 6)
-
-# 2) Channel breakdown within each region, faceted
-channel_counts <- shared_feats %>% count(region, channel) %>%
-  group_by(region) %>%
-  mutate(pct = n / sum(n)) %>%
-  ungroup()
-
-channel_pct <- shared_feats %>%
-  count(region, channel) %>%
-  group_by(region) %>%
-  mutate(pct = n / sum(n)) %>%
-  ungroup()
-
-ggsave("Channel_breakdown_by_region_Removed_feats.jpeg",
-  ggplot(channel_pct, aes(x = "", y = pct, fill = channel)) +
-  geom_col(width = 1) +
-  coord_polar(theta = "y") +
-  facet_wrap(~ region) +
-  theme_void() +
-  labs(title = "Channel breakdown by region"),
-  
-  height = 6, width = 6)
-
-###########################################
-library(tidyverse)
-
-rep1_p9 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep1_plate1-4_pearson_0.9.csv") %>%
-  mutate(rep = "rep1")
-
-rep2_p9 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep2_plate1-4_pearson_0.9.csv") %>%
-  mutate(rep = "rep2")
-
-rep3_p9 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep3_plate1-4_pearson_0.9.csv") %>%
-  mutate(rep = "rep3")
-
-dim(rep1_p9); dim(rep2_p9); dim(rep3_p9)
-
-#183 shared feats only
-
-rep1_p9_shared <- rep1_p9 %>%
-  dplyr::select(Well, Chemical, Concentration, any_of(shared_feats$features))
-
-rep2_p9_shared <- rep2_p9 %>%
-  dplyr::select(Well, Chemical, Concentration, any_of(shared_feats$features))
-
-rep3_p9_shared <- rep3_p9 %>%
-  dplyr::select(Well, Chemical, Concentration, any_of(shared_feats$features))
-
-exp_name <- "Removed_feats"
-
-dim(rep1_p9_shared)
-
-#Increasing the number of plates in the analysis
-rep1_plate1 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep1_plate1_pearson_0.9.csv")
-rep1_plate1_2 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep1_plate1-2_pearson_0.9.csv")
-rep1_plate1_3 <- read_csv("D:/Analysis_output/2026-08-12_Ref_chem_definitive_rep1_Pearson_Correlation_2/rep1_plate1-3_pearson_0.9.csv")
-
-exp_name <- "rep1_plt1-3"
-```
 #Plotting
 ```{r}
 relative_cell_count <- ggplot(cell_count_avg[cell_count_avg$Metadata_Chemical != ctrl_group,], aes(x = Metadata_Concentration, y = relative_cc, colour = Metadata_Chemical)) +
