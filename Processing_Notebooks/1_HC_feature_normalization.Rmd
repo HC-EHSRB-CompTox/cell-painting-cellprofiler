@@ -375,6 +375,11 @@ write_csv(test_chem_well_lowvar, file.path(pipeline_output_path, "test_chem_well
 # the larger total (summed) correlation to all other features, keeping the
 # one with lower overall redundancy. caret::findCorrelation(exact = TRUE)
 
+# pycytominer's correlation_threshold flags pairs of features correlated
+# above `corr_threshold` and, for each flagged pair, drops the member with
+# the larger total (summed) correlation to all other features, keeping the
+# one with lower overall redundancy. caret::findCorrelation(exact = TRUE)
+
 corr_thresholds <- c(0.5, 0.6, 0.7, 0.8, 0.9)
 
 # Correlation-only filter, applied to ALL features (no prior variance filtering)
@@ -386,18 +391,31 @@ if (n_na_corr > 0) {
   corr_matrix_all[is.na(corr_matrix_all)] <- 0
 }
 
-corr_only_results <- lapply(corr_thresholds, function(thresh) {
-  remove <- findCorrelation(corr_matrix_all, cutoff = thresh, exact = FALSE)
-  bind_cols(metadata_df, as.data.frame(feature_mat[, -remove, drop = FALSE]))
-})
-names(corr_only_results) <- paste0("pearson_", corr_thresholds)
+# For each threshold, compute retained + removed feature sets
+corr_results <- map(corr_thresholds, function(thresh) {
+  remove_idx <- findCorrelation(corr_matrix_all, cutoff = thresh, exact = FALSE)
 
-# Features retained at each cutoff
-sapply(corr_only_results, ncol) - ncol(metadata_df)
-
-iwalk(corr_only_results, function(df, name) {
-  write_csv(df, file.path(pipeline_output_path, paste0("test_chem_well_", name, ".csv")))
+  list(
+    retained = bind_cols(metadata_df, as.data.frame(feature_mat[, -remove_idx, drop = FALSE])),
+    removed  = bind_cols(metadata_df, as.data.frame(feature_mat[, remove_idx, drop = FALSE]))
+  )
 })
+names(corr_results) <- paste0("pearson_", corr_thresholds)
+
+# The "no threshold" variant only needs to be written once (doesn't depend on cutoff)
+corr_none <- bind_cols(metadata_df, as.data.frame(feature_mat))
+
+# Feature counts retained at each cutoff
+sapply(corr_results, function(x) ncol(x$retained)) - ncol(metadata_df)
+
+# Write retained + removed files for each threshold
+iwalk(corr_results, function(res, name) {
+  write_csv(res$retained, file.path(pipeline_output_path, paste0("test_chem_well_", name, ".csv")))
+  write_csv(res$removed,  file.path(pipeline_output_path, paste0("test_chem_well_", name, "_removed.csv")))
+})
+
+# Write the single "no threshold" file
+write_csv(corr_none, file.path(pipeline_output_path, "test_chem_well_pearson_none.csv"))
 ```
 
 

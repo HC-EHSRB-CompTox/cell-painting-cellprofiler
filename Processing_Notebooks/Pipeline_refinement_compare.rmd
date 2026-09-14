@@ -2,6 +2,10 @@
 ```{r}
 library(tidyverse)
 library(ggplot2)
+library(eulerr)
+library(polyclip)
+library(polylabelr)
+library(dplyr)
 ```
 #Sqt Mal compare
 ##Load data
@@ -141,8 +145,8 @@ plot
 ggsave("../Plots/sqrt_bmd_results_columbus_cellprofiler.png", plot, width = 15, height = 10,units = "cm")
 ```
 
-#New analysis comparision
-##Load data
+
+#Load data
 ```{r}
 # Load tcplfit results from a given rep's folder. Written as a self-contained
 # function (rather than reassigning a shared `tcpl_results_folder` variable
@@ -159,38 +163,41 @@ load_tcpl_folder <- function(folder) {
       read.csv(path) |>
         mutate(
           low_variance    = str_detect(label, "lowvar"),
-          pearson_thresh  = str_extract(label, "(?<=pearson_)[0-9.]+") |> as.numeric()
+          pearson_thresh  = str_extract(label, "(?<=pearson_)[0-9.]+") |> as.numeric(),
+          commonfeature = str_detect(label, "common"),
+          removedfeatures = str_detect(label, "removed"),
+          source_file    = basename(path),
+          source_folder   = folder
         )
     })
 }
-
 rep1 <- load_tcpl_folder("../Output/rep1/tcplfit_results/")
 rep2 <- load_tcpl_folder("../Output/rep2/tcplfit_results/")
 rep3 <- load_tcpl_folder("../Output/rep3/tcplfit_results/")
 rep4 <- load_tcpl_folder("../Output/rep4/tcplfit_results/")
 
-joined <- rbind(rep1, rep2, rep3, rep4)
+joined <- rbind(rep1, rep2, rep3, rep4) %>%
+  dplyr::filter(source_file != "tcpl_results_pearson_none.csv")%>% # same as _all_features, so removing one
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )%>%
+  rename(exp = exp_name)
 ```
 
 ##plot low varience
 ```{r}
-
 all_results <- joined %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "pearson_thresh", "low_variance"))) %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh", "low_variance", "removedfeatures" ,"source_file"))) %>%
   dplyr::filter(is.na(pearson_thresh)) %>% #get rid of the pearson stuff for now
-  mutate(source = "CP") %>%
-  rename(exp = exp_name) %>%
-  mutate(
-    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
-    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
-  )
+ dplyr::filter(removedfeatures == FALSE) # remove removed fetaures 
 
-#shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
 ggplot(all_results, aes(x = bmd, y = name, colour = exp)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
   scale_x_log10() +
- # scale_shape_manual(name = "exp", values = shape_list) +
+ scale_shape_manual(name = "exp", values = shape_list) +
   theme_bw() +
   facet_wrap(~low_variance) +
   theme(
@@ -210,14 +217,9 @@ ggplot(all_results, aes(x = bmd, y = name, colour = exp)) +
 ```{r}
 
 all_results <- joined %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "pearson_thresh", "low_variance"))) %>%
-  dplyr::filter(!low_variance) %>% #get rid of low varience est info
-  mutate(source = "CP") %>%
-  rename(exp = exp_name) %>%
-  mutate(
-    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
-    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
-  )
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh", "low_variance", "removedfeatures"))) %>%
+  dplyr::filter(!low_variance) %>% #get rid of low varience est info'
+   dplyr::filter(removedfeatures == FALSE)  #remove removed features
 
 plot <- ggplot(all_results, aes(x = bmd, y = name, colour = pearson_thresh)) +
   geom_point(size = 2) +
@@ -271,4 +273,428 @@ plot <- ggplot(all_results_avg, aes(x = bmd, y = name, colour = pearson_thresh))
   )
 
 plot
+
+
+# --- 1. CI width per threshold (log scale, since bmd is log-distributed) ---
+ci_width_summary <- all_results %>%
+  filter(!is.na(bmd), !is.na(bmdl), !is.na(bmdu)) %>%
+  mutate(log_ci_width = log10(bmdu) - log10(bmdl)) %>%
+  group_by(pearson_thresh) %>%
+  summarise(
+    mean_log_ci_width   = mean(log_ci_width, na.rm = TRUE),
+    median_log_ci_width = median(log_ci_width, na.rm = TRUE),
+    n_fits = n(),
+    .groups = "drop"
+  )
+
+ci_width_summary
+
+# --- 2. Fit success rate per threshold ---
+fit_rate_summary <- all_results %>%
+  group_by(pearson_thresh) %>%
+  summarise(
+    n_total = n(),
+    n_valid_bmd = sum(!is.na(bmd)),
+    fit_rate_pct = n_valid_bmd / n_total * 100,
+    .groups = "drop"
+  )
+
+fit_rate_summary
+
+# --- 3. Cross-replicate reproducibility per threshold ---
+# For each chemical x threshold, how consistent is bmd across reps (exp)?
+# Use coefficient of variation (CV) on the log scale — robust to BMD's wide dynamic range
+reproducibility_summary <- all_results %>%
+  filter(!is.na(bmd)) %>%
+  group_by(name, pearson_thresh) %>%
+  summarise(
+    n_reps = n(),
+    log_bmd_sd = sd(log10(bmd), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(n_reps >= 2) %>%   # CV only meaningful with 2+ reps present
+  group_by(pearson_thresh) %>%
+  summarise(
+    mean_log_bmd_sd = mean(log_bmd_sd, na.rm = TRUE),
+    n_chemicals_compared = n(),
+    .groups = "drop"
+  )
+
+reproducibility_summary
+
+# --- Combine all three into one comparison table ---
+threshold_comparison <- ci_width_summary %>%
+  left_join(fit_rate_summary, by = "pearson_thresh") %>%
+  left_join(reproducibility_summary, by = "pearson_thresh") %>%
+  arrange(pearson_thresh)
+
+threshold_comparison
+
+#PLOT
+
+threshold_comparison %>%
+  pivot_longer(cols = c(mean_log_ci_width, fit_rate_pct, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = pearson_thresh, y = value)) +
+  geom_line() +
+  geom_point(size = 2) +
+  facet_wrap(~metric, scales = "free_y", ncol = 1) +
+  theme_bw() +
+  labs(x = "Pearson correlation threshold", y = NULL,
+       title = "BMD modeling quality across correlation thresholds")
 ```
+
+##Retained v unretained features
+```{r}
+joined_unretained <- joined %>%
+  dplyr::filter(source_file %in% c("tcpl_results_pearson_0.9.csv", "tcpl_results_pearson_0.9_removed.csv")) %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "source_file", "removedfeatures")))
+
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+plot <- ggplot(joined_unretained, aes(x = bmd, y = name, colour = removedfeatures, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+#ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
+
+
+```
+
+##Pearson 0.9 versus common feature across reps
+```{r}
+joined_person0.9vcommon <- joined %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "commonfeature", "source_file"))) %>%
+  dplyr::filter(source_file %in% c("tcpl_results_pearson_0.9_common.csv", "tcpl_results_pearson_0.9.csv"))
+
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
+plot <- ggplot(joined_person0.9vcommon, aes(x = bmd, y = name, colour = commonfeature, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  scale_shape_manual(name = "exp", values = shape_list) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 13),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size = 9, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+#ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
+```
+
+# Pearson analysis 0.9 pie charts
+```{r}
+# List of replicate folders — update paths/names as needed
+rep_dirs <- c(
+  rep1 = "../Output/rep1",
+  rep2 = "../Output/rep2",
+  rep3 = "../Output/rep3"
+)
+
+rep_files <- file.path(rep_dirs, "test_chem_well_pearson_0.9.csv")
+names(rep_files) <- names(rep_dirs)
+
+# Read each file and extract the set of retained feature names (non-metadata)
+retained_features <- imap(rep_files, function(path, rep_name) {
+  df <- read_csv(path, show_col_types = FALSE)
+  feature_cols <- names(df)[!str_detect(names(df), "^Metadata_")]
+  feature_cols
+})
+
+# Fit and plot the Euler diagram
+fit <- euler(retained_features)
+
+plot(fit,
+     quantities = TRUE,
+     fills = list(fill = c("#66C2A5", "#FC8D62", "#8DA0CB"), alpha = 0.6),
+     labels = list(font = 2),
+     main = "Overlap of features retained after 0.9 Pearson filter")
+
+# --- Subset each rep down to the features common to all three ---
+
+# Intersection of feature names across all three reps
+common_features <- reduce(retained_features, intersect)
+length(common_features)  # should be 183
+
+# Re-read each rep's full retained file (rows + all its own retained columns),
+# then subset to metadata + the common feature set
+rep_common <- imap(rep_files, function(path, rep_name) {
+  df <- read_csv(path, show_col_types = FALSE)
+  meta_cols <- names(df)[str_detect(names(df), "^Metadata_")]
+  df %>% dplyr::select(all_of(meta_cols), all_of(common_features))
+})
+
+# Write out the subsetted files, one per rep, into their own folders
+iwalk(rep_common, function(df, rep_name) {
+  write_csv(df, file.path(rep_dirs[[rep_name]], "test_chem_well_pearson_0.9_common.csv"))
+})
+
+
+feature_breakdown <- tibble(feature = common_features) %>%
+  mutate(
+    module = str_extract(feature, "^[^_]+"),
+    region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
+    channel1 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 2],
+      TRUE ~ str_extract(feature, "_(AGP|ER|DNA|Mito|RNA)(_|$)") %>%
+               str_remove_all("_")
+    ),
+    channel2 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 3],
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  mutate(across(c(module, region, channel1, channel2), as.character))
+
+#deal why the multiple channels
+feature_breakdown <- feature_breakdown %>%
+  mutate(
+    channel_pair = if_else(
+      !is.na(channel2),
+      paste(pmin(channel1, channel2), pmax(channel1, channel2), sep = "-"),  # order-independent, so DNA-Mito == Mito-DNA
+      channel1
+    )
+  )
+
+
+make_pie <- function(df, group_col, title) {
+  counts <- df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::filter(!is.na(.data[[group_col]])) %>%
+    dplyr::mutate(pct = n / sum(n) * 100)
+
+  ggplot(counts, aes(x = "", y = n, fill = .data[[group_col]])) +
+    geom_col(width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    geom_text(aes(label = paste0(n, " (", round(pct, 1), "%)")),
+              position = position_stack(vjust = 0.5), size = 3) +
+    labs(title = title, fill = group_col) +
+    theme_void()
+}
+
+# 1. Distribution by module (e.g., AreaShape, Intensity, Texture, Correlation, Granularity, RadialDistribution)
+p_module <- make_pie(feature_breakdown, "module",
+                      "Feature module distribution (common features, 0.9 Pearson filter)")
+p_module
+
+# 2. Distribution by region (cells / cytoplasm / nuclei)
+p_region <- make_pie(feature_breakdown, "region",
+                      "Feature region distribution (common features)")
+p_region
+
+# 3. Distribution by channel1 (primary channel: AGP, ER, DNA, Mito, RNA)
+p_channel1 <- make_pie(feature_breakdown, "channel1",
+                        "Feature channel distribution (common features)")
+p_channel1
+
+p_channel_pair <- make_pie(feature_breakdown, "channel_pair",
+                            "Feature channel distribution (common features)")
+
+p_channel_pair
+
+#checking the totals
+check_total <- function(df, group_col) {
+  df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::summarise(
+      total_n = sum(n),
+      total_incl_na = sum(n),
+      total_excl_na = sum(n[!is.na(.data[[group_col]])])
+    )
+}
+
+check_total(feature_breakdown, "module")
+check_total(feature_breakdown, "region")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel1")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel_pair")
+module_counts_09 <- feature_breakdown %>%
+  dplyr::count(module, name = "n_after") %>%
+  dplyr::mutate(pct_after = n_after / sum(n_after) * 100)
+
+```
+#No Pearson analysis pie charts
+```{r}
+# List of replicate folders — update paths/names as needed
+rep_dirs <- c(
+  rep1 = "../Output/rep1",
+  rep2 = "../Output/rep2",
+  rep3 = "../Output/rep3"
+)
+
+rep_files <- file.path(rep_dirs, "test_chem_well_pearson_none.csv")
+names(rep_files) <- names(rep_dirs)
+
+# Read each file and extract the set of retained feature names (non-metadata)
+retained_features <- imap(rep_files, function(path, rep_name) {
+  df <- read_csv(path, show_col_types = FALSE)
+  feature_cols <- names(df)[!str_detect(names(df), "^Metadata_")]
+  feature_cols
+})
+
+# Fit and plot the Euler diagram
+fit <- euler(retained_features)
+
+plot(fit,
+     quantities = TRUE,
+     fills = list(fill = c("#66C2A5", "#FC8D62", "#8DA0CB"), alpha = 0.6),
+     labels = list(font = 2),
+     main = "Overlap of features retained after no Pearson filter")
+
+# --- Subset each rep down to the features common to all three ---
+
+# Intersection of feature names across all three reps
+common_features <- reduce(retained_features, intersect)
+length(common_features)  # should be 183
+
+# Re-read each rep's full retained file (rows + all its own retained columns),
+# then subset to metadata + the common feature set
+rep_common <- imap(rep_files, function(path, rep_name) {
+  df <- read_csv(path, show_col_types = FALSE)
+  meta_cols <- names(df)[str_detect(names(df), "^Metadata_")]
+  df %>% dplyr::select(all_of(meta_cols), all_of(common_features))
+})
+
+
+feature_breakdown <- tibble(feature = common_features) %>%
+  mutate(
+    module = str_extract(feature, "^[^_]+"),
+    region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
+    channel1 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 2],
+      TRUE ~ str_extract(feature, "_(AGP|ER|DNA|Mito|RNA)(_|$)") %>%
+               str_remove_all("_")
+    ),
+    channel2 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 3],
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  mutate(across(c(module, region, channel1, channel2), as.character))
+
+#deal why the multiple channels
+feature_breakdown <- feature_breakdown %>%
+  mutate(
+    channel_pair = if_else(
+      !is.na(channel2),
+      paste(pmin(channel1, channel2), pmax(channel1, channel2), sep = "-"),  # order-independent, so DNA-Mito == Mito-DNA
+      channel1
+    )
+  )
+
+
+make_pie <- function(df, group_col, title) {
+  counts <- df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::filter(!is.na(.data[[group_col]])) %>%
+    dplyr::mutate(pct = n / sum(n) * 100)
+
+  ggplot(counts, aes(x = "", y = n, fill = .data[[group_col]])) +
+    geom_col(width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    geom_text(aes(label = paste0(n, " (", round(pct, 1), "%)")),
+              position = position_stack(vjust = 0.5), size = 3) +
+    labs(title = title, fill = group_col) +
+    theme_void()
+}
+
+# 1. Distribution by module (e.g., AreaShape, Intensity, Texture, Correlation, Granularity, RadialDistribution)
+p_module <- make_pie(feature_breakdown, "module",
+                      "Feature module distribution (183 common features, 0.9 Pearson filter)")
+p_module
+
+# 2. Distribution by region (cells / cytoplasm / nuclei)
+p_region <- make_pie(feature_breakdown, "region",
+                      "Feature region distribution (183 common features)")
+p_region
+
+# 3. Distribution by channel1 (primary channel: AGP, ER, DNA, Mito, RNA)
+p_channel1 <- make_pie(feature_breakdown, "channel1",
+                        "Feature channel distribution (183 common features)")
+p_channel1
+
+p_channel_pair <- make_pie(feature_breakdown, "channel_pair",
+                            "Feature channel distribution (183 common features)")
+
+p_channel_pair
+
+#checking the totals
+check_total <- function(df, group_col) {
+  df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::summarise(
+      total_n = sum(n),
+      total_incl_na = sum(n),
+      total_excl_na = sum(n[!is.na(.data[[group_col]])])
+    )
+}
+
+check_total(feature_breakdown, "module")
+
+check_total(feature_breakdown, "region")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel1")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel_pair")
+module_counts_none <- feature_breakdown %>%
+  dplyr::count(module, name = "n_before") %>%
+  dplyr::mutate(pct_before = n_before / sum(n_before) * 100)
+```
+
+##Retention
+```{r}
+module_retention <- module_counts_none %>%
+  dplyr::full_join(module_counts_09, by = "module") %>%
+  dplyr::mutate(
+    n_before   = tidyr::replace_na(n_before, 0),
+    n_after    = tidyr::replace_na(n_after, 0),
+    pct_before = tidyr::replace_na(pct_before, 0),
+    pct_after  = tidyr::replace_na(pct_after, 0),
+    retention_rate = ifelse(n_before > 0, n_after / n_before * 100, NA_real_),
+    share_change   = pct_after - pct_before   # change in composition share, not retention
+  ) %>%
+  dplyr::arrange(desc(n_before))
+
+module_retention
+```
+
+
+
+
