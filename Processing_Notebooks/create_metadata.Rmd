@@ -176,12 +176,12 @@ df_cp %>%
 #Source code
 ```{r}
 
-pipeline_output_path <- "/Users/kristineccles/cell-painting-cellprofiler/Output/rep4/"
+pipeline_output_path <- "../Output/rep1/"
 dir.create(pipeline_output_path, recursive = TRUE, showWarnings = FALSE)
 
 
 #Create experiment name (for labeling files)
-exp_name <- paste("rep4")
+exp_name <- paste("rep1")
 ctrl_group <- "DMSO"
 
 
@@ -192,13 +192,11 @@ ctrl_group <- "DMSO"
 rmarkdown::render("../Processing_Notebooks/2_Reformat_feature_names.rmd")
 
 #### 3. Global Mahalanobis distance calculation and BMC analysis
-plots <-"../Plots/rep4/Mal_sqrt/"
+plots <-"../Plots/rep1"
 dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/3_Global PCA and Mahalnobis distances.rmd")
 
 #### 4. Categorical Mahalanobis distance calculation and BMC analysis
-plots <-"../Plots/rep2/Mal_sqrt/"
-dir.create(plots, recursive = TRUE, showWarnings = FALSE)
 rmarkdown::render("../Processing_Notebooks/4_Category PCA and Mahalanobis distances.rmd")
 ```
 

@@ -6,7 +6,7 @@ library(ggplot2)
 library(cowplot)
 library(data.table)
 library(tidyverse)
-
+library(dplyr)
 dir.create(
   file.path(pipeline_output_path, "feature_results"),
   showWarnings = FALSE,
@@ -14,7 +14,99 @@ dir.create(
 )
 ```
 
-#Features
+#Metadata check
+```{r}
+input_files <- list.files(
+  pipeline_output_path,
+  pattern = "^test_chem_well.*\\.csv$",
+  full.names = TRUE
+)
+
+check_results <- map_dfr(input_files, function(path) {
+  # just read the header, no need to load full file
+  header <- names(read_csv(path, n_max = 0, show_col_types = FALSE))
+  first4 <- header[1:4]
+
+  tibble(
+    file = basename(path),
+    col1 = first4[1],
+    col2 = first4[2],
+    col3 = first4[3],
+    col4 = first4[4],
+    all_metadata = all(str_starts(first4, "Metadata_")),
+    matches_expected = setequal(
+      first4,
+      c("Metadata_Chemical", "Metadata_Concentration", "Metadata_Well", "Metadata_Plate")
+    )
+  )
+})
+
+print(check_results)
+
+# Flag any problem files
+problems <- check_results %>% filter(!matches_expected)
+if (nrow(problems) > 0) {
+  warning("These files do NOT have the expected 4 Metadata_ columns first:\n",
+          paste(problems$file, collapse = "\n"))
+} else {
+  message("All files check out: first 4 columns are the expected Metadata_ columns.")
+}
+
+```
+#Filter for common features for catagorical analysis
+```{r}
+
+#after simplification there are fewer features maybe stop simplifictaion
+# List of replicate folders
+rep_dirs <- c(
+  rep1 = "../Output/rep1",
+  rep2 = "../Output/rep2",
+  rep3 = "../Output/rep3"
+)
+
+# File paths
+rep_files <- file.path(
+  rep_dirs,
+  "test_chem_well_pearson_0.9.csv"
+)
+names(rep_files) <- names(rep_dirs)
+
+
+# Read each file
+rep_data <- imap(rep_files, function(path, rep_name) {
+  read_csv(path, show_col_types = FALSE)
+})
+
+
+# Get feature names
+retained_features <- map(rep_data, names)
+
+
+# Intersection of feature names across all three reps
+common_features <- reduce(retained_features, intersect)
+
+length(common_features)
+
+
+# Keep only the common features
+rep_common <- imap(rep_data, function(df, rep_name) {
+  df %>%
+    dplyr::select(all_of(common_features))
+})
+
+
+# Write common-feature files
+iwalk(rep_common, function(df, rep_name) {
+  write_csv(
+    df,
+    file.path(
+      rep_dirs[[rep_name]],
+      "test_chem_well_pearson_0.9_common.csv"
+    )
+  )
+})
+```
+#Simplify features for catagorical analysis
 ```{r}
 # Reformat one test_chem_well-style data frame: collapse verbose CellProfiler
 # feature names into simplified category names and set Chemical_Conc_Well_Plate
@@ -31,13 +123,10 @@ test_chem_well <- test_chem_well[, variances != 0 & !is.na(variances)]
 feature_cols  <- test_chem_well[, 5:ncol(test_chem_well)]
 
 features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
-  mutate(
-    # ── Core structural parsing ──────────────────────────────────────────────
-    module  = str_extract(feature, "^[^_]+"),
-    region  = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
-    
-    # ── Channel extraction ───────────────────────────────────────────────────
-    # Correlation has two channels; everything else has at most one
+   mutate(
+     feature_base = str_remove(feature, "_(cells|cytoplasm|nuclei)$"),
+    module = str_extract(feature, "^[^_]+"),
+    region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
     channel1 = case_when(
       module == "Correlation" ~
         str_match(feature,
@@ -52,97 +141,22 @@ features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
           "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
         )[, 3],
       TRUE ~ NA_character_
-    ),
-    
-    # ── Specific measurement label ───────────────────────────────────────────
-    specific = case_when(
-      
-      # Granularity: no meaningful sub-type, label by scale
-      module == "Granularity" ~ "Granularity",
-      
-      # AreaShape: split into Size vs Shape 
-      str_detect(feature, paste(c(
-        "Area","BoundingBoxArea","EquivalentDiameter",
-        "MajorAxisLength","MinorAxisLength",
-        "MaxFeretDiameter","MinFeretDiameter",
-        "MaximumRadius","MeanRadius","MedianRadius","Perimeter"
-      ), collapse = "|")) ~ "Size",
-      str_detect(feature, paste(c(
-        "Compactness","Eccentricity","Extent",
-        "FormFactor","Solidity","Orientation","EulerNumber"
-      ), collapse = "|")) ~ "Shape",
-
-      # Intensity subtypes
-      str_detect(feature, "IntegratedIntensity") ~ "IntegratedIntensity",
-      str_detect(feature, "MeanIntensity")        ~ "MeanIntensity",
-      str_detect(feature, "MaxIntensity")         ~ "MaxIntensity",
-      str_detect(feature, "MinIntensity")         ~ "MinIntensity",
-      str_detect(feature, "StdIntensity")         ~ "StdIntensity",
-      str_detect(feature, "MedianIntensity")      ~ "MedianIntensity",
-      str_detect(feature, "MADIntensity")         ~ "MADIntensity",
-      str_detect(feature, "UpperQuartileIntensity") ~ "UpperQuartileIntensity",
-      str_detect(feature, "LowerQuartileIntensity") ~ "LowerQuartileIntensity",
-      str_detect(feature, "MassDisplacement")     ~ "MassDisplacement",
-
-      # Texture subtypes
-      str_detect(feature, "Gabor")                ~ "Gabor",
-      str_detect(feature, "AngularSecondMoment")  ~ "AngularSecondMoment",
-      str_detect(feature, "InverseDifferenceMoment") ~ "InverseDifferenceMoment",
-      str_detect(feature, "SumAverage")           ~ "SumAverage",
-      str_detect(feature, "SumEntropy")           ~ "SumEntropy",
-      str_detect(feature, "SumVariance")          ~ "SumVariance",
-      str_detect(feature, "DifferenceEntropy")    ~ "DifferenceEntropy",
-      str_detect(feature, "DifferenceVariance")   ~ "DifferenceVariance",
-      str_detect(feature, "InfoMeas1")            ~ "InfoMeas1",
-      str_detect(feature, "InfoMeas2")            ~ "InfoMeas2",
-      str_detect(feature, "Texture_Entropy")      ~ "Entropy",
-      str_detect(feature, "Texture_Variance")     ~ "Variance",
-      str_detect(feature, "Texture_Contrast")     ~ "Contrast",
-      str_detect(feature, "Texture_Correlation")  ~ "TextureCorrelation",
-
-      # Radial distribution subtypes
-      str_detect(feature, "FracAtD")   ~ "FractionAtDistance",
-      str_detect(feature, "MeanFrac")  ~ "MeanFraction",
-      str_detect(feature, "RadialCV")  ~ "RadialCV",
-
-      # Colocalization subtypes (within Correlation module)
-      str_detect(feature, "Correlation_Costes")     ~ "Costes",
-      str_detect(feature, "Correlation_K_")         ~ "KCoefficient",
-      str_detect(feature, "Correlation_Manders")    ~ "Manders",
-      str_detect(feature, "Correlation_Overlap")    ~ "Overlap",
-      str_detect(feature, "Correlation_RWC")        ~ "RWC",
-      str_detect(feature, "Correlation_Correlation") ~ "PearsonCorrelation",
-
-      # Spatial / neighbors
-      str_detect(feature, "AngleBetween")       ~ "Spatial",
-      str_detect(feature, "FirstClosest")        ~ "Spatial",
-      str_detect(feature, "SecondClosest")       ~ "Spatial",
-      str_detect(feature, "NumberOfNeighbors")   ~ "Spatial",
-      str_detect(feature, "PercentTouching")     ~ "Spatial",
-
-      # Position / location metadata
-      str_detect(feature, "CenterMassIntensity") ~ "Position",
-      str_detect(feature, "MaxIntensity_[XY]")   ~ "Position",
-      str_detect(feature, "Center_[XY]")         ~ "Position",
-      str_detect(feature, "BoundingBox")         ~ "Position",
-
-      # Fallback
-      TRUE ~ str_extract(feature, "(?<=_)[^_]+")
-    ),
-  ) 
+    )
+  ) %>%
+  mutate(across(c(module, region, channel1, channel2), as.character))
 
 features <- features %>%
-  group_by(region, specific, channel1, channel2, module) %>%
+  group_by(region, channel1, channel2, module) %>%
   mutate(cat_group = cur_group_id()) %>%
   mutate(ft_no = row_number()) %>%
   ungroup()
 
 ft_colnames <- features %>%
-  dplyr::select(region, specific, channel1, channel2, module, cat_group, ft_no)
+  dplyr::select(region, channel1, channel2, module, cat_group, ft_no)
 
 #Concatenate region, channel, and module
 ft_colnames2 <- apply(
-  ft_colnames[, c("region", "specific", "channel1", "channel2", "module")],
+  ft_colnames[, c("region", "channel1", "channel2", "module")],
   1,
   \(x) paste(na.omit(x), collapse = "_")
 )
@@ -158,8 +172,7 @@ fts <- rbind(sample_info, ft_colnames2)
 #Replace the original features names with the reformatted feature names
 colnames(test_chem_well) <- t(fts) # run code up to here for BMDExpress formatting
 
-#remove individual metadate collomns
-#i added plate
+##Concatenate chemical name, plate number, and well ID in one column
 test_chem_well$Chemical <- paste0(test_chem_well$Metadata_Chemical, "_",test_chem_well$Metadata_Concentration, "_", test_chem_well$Metadata_Well, "_",test_chem_well$Metadata_Plate)
 
 test_chem_well <- test_chem_well[, !names(test_chem_well) %in% c("Metadata_Plate", "Metadata_Well","Metadata_Concentration", "Metadata_Chemical")]
@@ -173,6 +186,10 @@ test_chem_well <- test_chem_well %>%
   dplyr::select(-Chemical)
 
 test_chem_well
+list(
+  data = test_chem_well,
+  ft_colnames2 = ft_colnames2
+)
 }
 
 # Loop over every feature-selected variant saved by the previous notebook
@@ -189,19 +206,41 @@ walk(input_files, function(path) {
   message("Reformatting: ", basename(path))
 
   df <- read_csv(path, show_col_types = FALSE)
-  reformatted <- reformat_feature_names(df)
+
+  result <- reformat_feature_names(df)
+
+  reformatted <- result$data
+  ft_colnames2 <- result$ft_colnames2
 
   out_name <- str_replace(
     basename(path),
     "^test_chem_well",
-    "Well-level_data_simplified_categories"
+    "test_chem_cat"
   )
 
   write.csv(
     reformatted,
-    file.path(pipeline_output_path, "feature_results", out_name),
+    file.path(
+      pipeline_output_path,
+      "feature_results",
+      out_name
+    ),
     row.names = TRUE
+  )
+
+  # Save category labels for this feature set
+  write.csv(
+    ft_colnames2,
+    file.path(
+      pipeline_output_path,
+      "feature_results",
+      str_replace(
+        out_name,
+        "\\.csv$",
+        "_ft_colnames2.csv"
+      )
+    ),
+    row.names = FALSE
   )
 })
 ```
-

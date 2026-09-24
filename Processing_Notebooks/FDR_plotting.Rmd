@@ -1,0 +1,115 @@
+
+#Load in data from Andrew
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+load("../Input/Andrew/FPR_simulation_results.RData")
+```
+
+```{r}
+
+plot_D <- summary_D %>%
+  mutate(Method = "D")
+
+plot_d2 <- summary_D2 %>%
+  mutate(Method = "D²")
+
+# Combine
+plot_df <- bind_rows(plot_D, plot_d2) %>%
+  mutate(
+    SampleSize = as.numeric(SampleSize)
+  )
+
+# Function to make each panel
+make_fpr_plot <- function(data, yvar, title, y_max = NULL) {
+
+  p <- ggplot(
+    data,
+    aes(
+      x = SampleSize,
+      y = .data[[yvar]],
+      group = Method,
+      color = Method,
+    )
+  ) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 2.2) +
+
+    # 5% and 10% thresholds
+    geom_hline(
+      yintercept = 0.05,
+      color = "red",
+      linetype = "dashed",
+      linewidth = 0.6
+    ) +
+    geom_hline(
+      yintercept = 0.10,
+      color = "blue",
+      linetype = "dashed",
+      linewidth = 0.6
+    ) +
+
+    scale_color_manual(
+      values = c("D²" = "#440154", "D" = "#21918c")
+    ) +
+
+    scale_x_continuous(
+      breaks = sort(unique(data$SampleSize))
+    ) +
+
+    labs(
+      title = title,
+      x = "Sample Size per Dose Group (n)",
+      y = "False Positive Rate (FPR)",
+      color = NULL,
+      shape = NULL,
+      linetype = NULL
+    ) +
+ theme_bw() + 
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+  if (!is.null(y_max)) {
+    p <- p + coord_cartesian(ylim = c(0, y_max))
+  }
+
+  p
+}
+
+
+# Three panels
+p1 <- make_fpr_plot(
+  plot_df,
+  "Global_FPR",
+  "Global Mahalanobis FPR",
+  y_max = 0.51
+)
+p1
+ggsave("../Plots/Andrew/global_fdr.png", p1, width = 10, height = 10,units = "cm")
+p2 <- make_fpr_plot(
+  plot_df,
+  "AnyCat_FPR",
+  "Category Mahalanobis FPR\n(≥ 1 active category)",
+  y_max = 0.51
+)
+p2
+ggsave("../Plots/Andrew/cat_fdr.png", p2, width = 10, height = 10,units = "cm")
+p3 <- make_fpr_plot(
+  plot_df,
+  "Combined_FPR",
+  "Combined FPR",
+  y_max = 0.51
+)
+p3
+ggsave("../Plots/Andrew/combined_fdr.png", p3, width = 10, height = 10,units = "cm")
+```
+

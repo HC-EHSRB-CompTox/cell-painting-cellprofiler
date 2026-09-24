@@ -9,7 +9,6 @@ library(ggplot2)
 cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
-cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
 cp <- rbind(cp_rep1, cp_rep2,cp_rep3,cp_rep4)
 columbus <- read.csv("../Input/All exp BMC.csv")
 nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
@@ -21,8 +20,7 @@ nyf <- read.csv("../Input/Nyf_2020_bmd.csv")
 columbus <- columbus %>%
   dplyr::filter(exp %in% c("Definitive_rep1",
                            "Definitive_rep2",
-                           "Definitive_rep3",
-                           "Definitive_rep4")) %>%
+                           "Definitive_rep3")) %>%
   dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp"))) %>%
   mutate(source = "Columbus")
 
@@ -33,7 +31,6 @@ columbus <- columbus %>%
       exp %in% c("Definitive_rep1") ~ "rep1",
       exp %in% c("Definitive_rep2") ~ "rep2",
       exp %in% c("Definitive_rep3") ~ "rep3",
-      exp %in% c("Definitive_rep4") ~ "rep4",
       TRUE ~ exp
     )
   )
@@ -88,7 +85,7 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
   scale_shape_manual(name = "exp", values = shape_list) +
   theme_bw() +
   theme(
-    legend.position = "right",
+    legend.position = "bottom",
     axis.title.x = element_text(size = 13, margin = margin(t = 15)),
     axis.title.y = element_text(size = 13),
     axis.text.x = element_text(size = 10, colour = "black"),
@@ -99,7 +96,7 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
   )
 
 plot
-ggsave("../Plots/combined_nosqrt.png", plot, width = 15, height = 10,units = "cm")
+ggsave("../Plots/combined_nosqrt.png", plot, width = 20, height = 10,units = "cm")
 ```
 
 
@@ -168,13 +165,11 @@ ggplot(joined, aes(x = bmd, y = name, colour = source, shape = exp)) +
 cp_rep1 <- read.csv("../Output/rep1/rep1_DMSO_Category Mahalanobis - tcplResult.csv")
 cp_rep2 <- read.csv("../Output/rep2/rep2_DMSO_Category Mahalanobis - tcplResult.csv")
 #cp_rep3 <- read.csv("../Output/rep3/")
-cp_rep4 <- read.csv("../Output/rep4/rep4_DMSO_Category Mahalanobis - tcplResult.csv")
 cp <- rbind(cp_rep1, cp_rep2, cp_rep4)
 
 columbus_rep1 <- read.csv("../Input/Rep1_Category Mahalanobis - tcplResult.csv")
 columbus_rep2 <- read.csv("../Input/Rep2_Category Mahalanobis - tcplResult.csv")
 columbus_rep3 <- read.csv("../Input/Rep3_Category Mahalanobis - tcplResult.csv")
-columbus_rep4 <- read.csv("../Input/Rep4_Category Mahalanobis - tcplResult.csv")
 columbus <- rbind(columbus_rep1, columbus_rep2, columbus_rep3, columbus_rep4)
 ```
 
@@ -184,8 +179,7 @@ columbus <- rbind(columbus_rep1, columbus_rep2, columbus_rep3, columbus_rep4)
 columbus <- columbus %>%
   dplyr::filter(exp %in% c("Definitive_rep1",
                            "Definitive_rep2",
-                           "Definitive_rep3",
-                           "Definitive_rep4")) %>%
+                           "Definitive_rep3")) %>%
   dplyr::select(any_of(c("bmd", "chem", "bmdl", "bmdu", "exp", "feat"))) %>%
   mutate(source = "Columbus")
 
@@ -196,7 +190,6 @@ columbus <- columbus %>%
       exp %in% c("Definitive_rep1") ~ "rep1",
       exp %in% c("Definitive_rep2") ~ "rep2",
       exp %in% c("Definitive_rep3") ~ "rep3",
-      exp %in% c("Definitive_rep4") ~ "rep4",
       TRUE ~ exp
     )
   )

@@ -6,26 +6,50 @@ library(eulerr)
 library(polyclip)
 library(polylabelr)
 library(dplyr)
+library(ggrepel)
+library(viridis)
+top_names <- c("Metoclopramide","5-Nitro-2-(3-phenylpropylamino)benzoic acid", "Sorbitol")
 ```
-#Sqt Mal compare
-##Load data
+
+#Pearson 0.9 compare
+##Load cellprofiler
+```{r}
+cp_rep1 <- read.csv("../Output/rep1/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_0.9.csv")
+cp_rep2 <- read.csv("../Output/rep2/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_0.9.csv")
+cp_rep3 <- read.csv("../Output/rep2/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_0.9.csv")
+
+# Combine all
+cp <- rbind(
+  cp_rep1, cp_rep2, cp_rep3
+)
+cp <- cp %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name"))) %>%
+  mutate(source = "CP") %>%
+  rename(exp = exp_name) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+```
+
+
+#CellProfiler
+##SQRT Mal
 ```{r}
 # sqrt
-cp_rep1 <- read.csv("../Output/rep1/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
+cp_rep1 <- read.csv("../Output/rep1/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_none.csv")
 cp_rep1$rep <- "rep1"
 cp_rep1$is_sqrt <- TRUE
 
-cp_rep2 <- read.csv("../Output/rep2/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
+cp_rep2 <- read.csv("../Output/rep2/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_none.csv")
 cp_rep2$rep <- "rep2"
 cp_rep2$is_sqrt <- TRUE
 
-cp_rep3 <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
+cp_rep3 <- read.csv("../Output/rep3/tcplfit_results/tcpl_results_global_test_chem_cat_pearson_none.csv")
 cp_rep3$rep <- "rep3"
 cp_rep3$is_sqrt <- TRUE
 
-cp_rep4 <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_sqartmal.csv")
-cp_rep4$rep <- "rep4"
-cp_rep4$is_sqrt <- TRUE
 
 
 # No sqrt
@@ -41,91 +65,28 @@ cp_rep3_nosqrt <- read.csv("../Output/rep3/_Global fitting Mahalanobis - tcplRes
 cp_rep3_nosqrt$rep <- "rep3"
 cp_rep3_nosqrt$is_sqrt <- FALSE
 
-cp_rep4_nosqrt <- read.csv("../Output/rep4/_Global fitting Mahalanobis - tcplResult_NOTsqartmal.csv")
-cp_rep4_nosqrt$rep <- "rep4"
-cp_rep4_nosqrt$is_sqrt <- FALSE
+
 
 
 # Combine all
 cp <- rbind(
-  cp_rep1, cp_rep2, cp_rep3, cp_rep4,
+  cp_rep1, cp_rep2, cp_rep3,
   cp_rep1_nosqrt, 
   cp_rep2_nosqrt,
-  cp_rep3_nosqrt, 
-  cp_rep4_nosqrt
+  cp_rep3_nosqrt
 )
 
-```
-
-##Mutate and plotr
-```{r}
 cp <- cp %>%
   dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp_name", "is_sqrt"))) %>%
   mutate(source = "CP") %>%
   rename(exp = exp_name) %>%
   mutate(
     name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
-    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
-  )
-
-shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
-plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
-  scale_x_log10() +
-  scale_shape_manual(name = "exp", values = shape_list) +
-  theme_bw() +
-  theme(
-    legend.position = "right",
-    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
-    axis.title.y = element_text(size = 13),
-    axis.text.x = element_text(size = 10, colour = "black"),
-    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
-    strip.text.x = element_text(size = 9, face = "bold"),
-    strip.background = element_rect(fill = NA),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-  )
-
-plot
-ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
-```
-
-##Load Columbus results
-```{r}
-columbus<- read.csv("../Input/Definitive_study_BMC_sqrt_vs_nosqrt.csv")
-
-columbus <- columbus %>%
-  dplyr::filter(exp %in% c("Definitive_rep1",
-                           "Definitive_rep2",
-                           "Definitive_rep3",
-                           "Definitive_rep4")) %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp",  "Sqrt"))) %>%
-  mutate(source = "Columbus") %>%
-  mutate(
-    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
-    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
-  )
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)) %>%
+  dplyr::mutate(name = forcats::fct_relevel(factor(name), top_names, after = Inf))
 
 
-columbus <- columbus %>% 
-  mutate(is_sqrt = Sqrt == "Squarerooted") %>%
-  dplyr::select(-Sqrt)
-
-columbus <- columbus %>%
-  # rename exp IDs to reps
-  dplyr::mutate(
-    exp = dplyr::case_when(
-      exp %in% c("Definitive_rep1") ~ "rep1",
-      exp %in% c("Definitive_rep2") ~ "rep2",
-      exp %in% c("Definitive_rep3") ~ "rep3",
-      exp %in% c("Definitive_rep4") ~ "rep4",
-      TRUE ~ exp
-    )
-  )
-
-joined <- rbind(columbus, cp)
-
-plot <- ggplot(joined, aes(x = bmd, y = name, colour = is_sqrt, shape = source)) +
+cp_plot <- ggplot(cp, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
   scale_x_log10() +
@@ -141,12 +102,10 @@ plot <- ggplot(joined, aes(x = bmd, y = name, colour = is_sqrt, shape = source))
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
 
-plot
-ggsave("../Plots/sqrt_bmd_results_columbus_cellprofiler.png", plot, width = 15, height = 10,units = "cm")
+cp_plot
+ggsave("../Plots/cellprofiler/sqrt_bmd_results_cellprofiler.png", cp_plot, width = 20, height = 10,units = "cm")
 ```
-
-
-#Load data
+##Load data
 ```{r}
 # Load tcplfit results from a given rep's folder. Written as a self-contained
 # function (rather than reassigning a shared `tcpl_results_folder` variable
@@ -174,9 +133,8 @@ load_tcpl_folder <- function(folder) {
 rep1 <- load_tcpl_folder("../Output/rep1/tcplfit_results/")
 rep2 <- load_tcpl_folder("../Output/rep2/tcplfit_results/")
 rep3 <- load_tcpl_folder("../Output/rep3/tcplfit_results/")
-rep4 <- load_tcpl_folder("../Output/rep4/tcplfit_results/")
 
-joined <- rbind(rep1, rep2, rep3, rep4) %>%
+joined <- rbind(rep1, rep2, rep3) %>%
   dplyr::filter(source_file != "tcpl_results_pearson_none.csv")%>% # same as _all_features, so removing one
   mutate(
     name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
@@ -185,15 +143,15 @@ joined <- rbind(rep1, rep2, rep3, rep4) %>%
   rename(exp = exp_name)
 ```
 
-##plot low varience
+###plot low varience
 ```{r}
 all_results <- joined %>%
   dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh", "low_variance", "removedfeatures" ,"source_file"))) %>%
   dplyr::filter(is.na(pearson_thresh)) %>% #get rid of the pearson stuff for now
  dplyr::filter(removedfeatures == FALSE) # remove removed fetaures 
 
-shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
-ggplot(all_results, aes(x = bmd, y = name, colour = exp)) +
+shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18)
+plot <- ggplot(all_results, aes(x = bmd, y = name, shape = exp, colour = low_variance)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
   scale_x_log10() +
@@ -210,22 +168,23 @@ ggplot(all_results, aes(x = bmd, y = name, colour = exp)) +
     strip.background = element_rect(fill = NA),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
   )
-
-
+plot
+ggsave("../Plots/cellprofiler/cellprofiler_lowvar.png", plot, width = 20, height = 10,units = "cm")
 ```
-##plot pearsons
+###plot pearsons
 ```{r}
 
 all_results <- joined %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh", "low_variance", "removedfeatures"))) %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh", "low_variance", "removedfeatures", "commonfeature"))) %>%
   dplyr::filter(!low_variance) %>% #get rid of low varience est info'
+  dplyr::filter(commonfeature == FALSE) %>% #remove common features
    dplyr::filter(removedfeatures == FALSE)  #remove removed features
 
 plot <- ggplot(all_results, aes(x = bmd, y = name, colour = pearson_thresh)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
   scale_x_log10() +
-  scale_colour_viridis_c(na.value = "red") +
+  scale_colour_continuous(na.value = "red") +
   theme_bw() +
   facet_wrap(~exp)+
   theme(
@@ -240,71 +199,27 @@ plot <- ggplot(all_results, aes(x = bmd, y = name, colour = pearson_thresh)) +
   )
 
 plot
-
-# Average across reps (exp) within each chemical / pearson_thresh cutoff, so
-# each name x pearson_thresh combo collapses to a single point.
-all_results_avg <- all_results %>%
-  group_by(name, pearson_thresh) %>%
-  summarise(
-    n_reps = sum(!is.na(bmd)),
-    bmd = mean(bmd, na.rm = TRUE),
-    bmdl = mean(bmdl, na.rm = TRUE),
-    bmdu = mean(bmdu, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  # mean() of all-NA groups yields NaN; keep these as NA
-  mutate(across(c(bmd, bmdl, bmdu), ~ ifelse(is.nan(.x), NA, .x)))
-
-plot <- ggplot(all_results_avg, aes(x = bmd, y = name, colour = pearson_thresh)) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
-  scale_x_log10() +
-  scale_colour_viridis_c(na.value = "red") +
-  theme_bw() +
-  theme(
-    legend.position = "right",
-    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
-    axis.title.y = element_text(size = 13),
-    axis.text.x = element_text(size = 10, colour = "black"),
-    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
-    strip.text.x = element_text(size = 9, face = "bold"),
-    strip.background = element_rect(fill = NA),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-  )
-
-plot
+ggsave("../Plots/cellprofiler/cellprofiler_multiplePC.png", plot, width = 20, height = 10,units = "cm")
 
 
-# --- 1. CI width per threshold (log scale, since bmd is log-distributed) ---
-ci_width_summary <- all_results %>%
+```
+
+####checks
+```{r}
+# remove non responded chems
+
+all_results <- all_results %>%
+    dplyr::filter(!name %in% c("Metoclopramide", "Sorbitol", "5-Nitro-2-(3-phenylpropylamino)benzoic acid"))
+# CI width per chemical x threshold
+ci_width_by_chem <- all_results %>%
   filter(!is.na(bmd), !is.na(bmdl), !is.na(bmdu)) %>%
   mutate(log_ci_width = log10(bmdu) - log10(bmdl)) %>%
-  group_by(pearson_thresh) %>%
-  summarise(
-    mean_log_ci_width   = mean(log_ci_width, na.rm = TRUE),
-    median_log_ci_width = median(log_ci_width, na.rm = TRUE),
-    n_fits = n(),
-    .groups = "drop"
-  )
+  group_by(name, pearson_thresh) %>%
+  summarise(mean_log_ci_width = mean(log_ci_width, na.rm = TRUE), .groups = "drop")
 
-ci_width_summary
 
-# --- 2. Fit success rate per threshold ---
-fit_rate_summary <- all_results %>%
-  group_by(pearson_thresh) %>%
-  summarise(
-    n_total = n(),
-    n_valid_bmd = sum(!is.na(bmd)),
-    fit_rate_pct = n_valid_bmd / n_total * 100,
-    .groups = "drop"
-  )
-
-fit_rate_summary
-
-# --- 3. Cross-replicate reproducibility per threshold ---
-# For each chemical x threshold, how consistent is bmd across reps (exp)?
-# Use coefficient of variation (CV) on the log scale — robust to BMD's wide dynamic range
-reproducibility_summary <- all_results %>%
+# Reproducibility (log BMD SD) per chemical x threshold — already per-chemical
+reproducibility_by_chem <- all_results %>%
   filter(!is.na(bmd)) %>%
   group_by(name, pearson_thresh) %>%
   summarise(
@@ -312,97 +227,92 @@ reproducibility_summary <- all_results %>%
     log_bmd_sd = sd(log10(bmd), na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  filter(n_reps >= 2) %>%   # CV only meaningful with 2+ reps present
-  group_by(pearson_thresh) %>%
-  summarise(
-    mean_log_bmd_sd = mean(log_bmd_sd, na.rm = TRUE),
-    n_chemicals_compared = n(),
-    .groups = "drop"
+  filter(n_reps >= 2)
+
+# --- Combine into one long table for faceted plotting ---
+by_chem_comparison <- ci_width_by_chem %>%
+  full_join(reproducibility_by_chem %>% rename(mean_log_bmd_sd = log_bmd_sd),
+            by = c("name", "pearson_thresh")) %>%
+  arrange(name, pearson_thresh)
+
+by_chem_comparison
+
+# --- PLOT: one line per chemical, faceted by metric ---
+na_placeholder <- min(by_chem_comparison$pearson_thresh, na.rm = TRUE) + 0.5
+
+by_chem_comparison %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
+  ) %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  ggplot(aes(x = pearson_thresh_plot, y = value, colour = name, group = name)) +
+  geom_line(alpha = 0.6) +
+  geom_point(size = 1.5, alpha = 0.7) +
+  scale_x_continuous(
+    breaks = c(na_placeholder, sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)]))),
+    labels = c("NA", sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)])))
+  ) +
+  facet_wrap(~metric, scales = "free_y", ncol = 1) +
+  theme_bw() +
+  labs(x = "Pearson correlation threshold", y = NULL, colour = "Chemical",
+       title = "BMD modeling quality across correlation thresholds, by chemical")
+
+# --- Average across chemicals, using the SAME per-chemical data as the individual lines ---
+avg_across_chem <- by_chem_comparison %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  group_by(pearson_thresh, metric) %>%
+  summarise(avg_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+# --- PLOT: individual chemical lines (thin, grey) + average overlay (bold, black) ---
+na_placeholder <- max(by_chem_comparison$pearson_thresh, na.rm = TRUE) + 0.1
+
+by_chem_long <- by_chem_comparison %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
+  ) %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value))
+
+avg_across_chem_plot <- avg_across_chem %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
   )
 
-reproducibility_summary
-
-# --- Combine all three into one comparison table ---
-threshold_comparison <- ci_width_summary %>%
-  left_join(fit_rate_summary, by = "pearson_thresh") %>%
-  left_join(reproducibility_summary, by = "pearson_thresh") %>%
-  arrange(pearson_thresh)
-
-threshold_comparison
-
-#PLOT
-
-threshold_comparison %>%
-  pivot_longer(cols = c(mean_log_ci_width, fit_rate_pct, mean_log_bmd_sd),
-               names_to = "metric", values_to = "value") %>%
-  ggplot(aes(x = pearson_thresh, y = value)) +
-  geom_line() +
-  geom_point(size = 2) +
+ggplot() +
+  geom_line(data = by_chem_long,
+            aes(x = pearson_thresh_plot, y = value, group = name),
+            colour = "grey75", alpha = 0.6) +
+  geom_point(data = by_chem_long,
+             aes(x = pearson_thresh_plot, y = value, group = name),
+             colour = "grey75", size = 1, alpha = 0.5) +
+  geom_line(data = avg_across_chem_plot,
+            aes(x = pearson_thresh_plot, y = avg_value, group = metric),
+            colour = "red", linewidth = 1) +
+  geom_point(data = avg_across_chem_plot,
+             aes(x = pearson_thresh_plot, y = avg_value, group = metric),
+             colour = "red", size = 2.5) +
+  scale_x_continuous(
+    breaks = c(na_placeholder, sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)]))),
+    labels = c("NA", sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)])))
+  ) +
   facet_wrap(~metric, scales = "free_y", ncol = 1) +
   theme_bw() +
   labs(x = "Pearson correlation threshold", y = NULL,
-       title = "BMD modeling quality across correlation thresholds")
-```
-
-##Retained v unretained features
-```{r}
-joined_unretained <- joined %>%
-  dplyr::filter(source_file %in% c("tcpl_results_pearson_0.9.csv", "tcpl_results_pearson_0.9_removed.csv")) %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "source_file", "removedfeatures")))
-
-shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
-plot <- ggplot(joined_unretained, aes(x = bmd, y = name, colour = removedfeatures, shape = exp)) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
-  scale_x_log10() +
-  scale_shape_manual(name = "exp", values = shape_list) +
-  theme_bw() +
-  theme(
-    legend.position = "right",
-    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
-    axis.title.y = element_text(size = 13),
-    axis.text.x = element_text(size = 10, colour = "black"),
-    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
-    strip.text.x = element_text(size = 9, face = "bold"),
-    strip.background = element_rect(fill = NA),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-  )
-
-plot
-#ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
-
+       title = "BMD modeling quality across correlation thresholds",
+       subtitle = "Grey = individual chemicals, Red = average across chemicals")
 
 ```
 
-##Pearson 0.9 versus common feature across reps
-```{r}
-joined_person0.9vcommon <- joined %>%
-  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "commonfeature", "source_file"))) %>%
-  dplyr::filter(source_file %in% c("tcpl_results_pearson_0.9_common.csv", "tcpl_results_pearson_0.9.csv"))
 
-shape_list <- c("rep1" =16, "rep2" =17, "rep3" =18, "rep4" =1)
-plot <- ggplot(joined_person0.9vcommon, aes(x = bmd, y = name, colour = commonfeature, shape = exp)) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
-  scale_x_log10() +
-  scale_shape_manual(name = "exp", values = shape_list) +
-  theme_bw() +
-  theme(
-    legend.position = "right",
-    axis.title.x = element_text(size = 13, margin = margin(t = 15)),
-    axis.title.y = element_text(size = 13),
-    axis.text.x = element_text(size = 10, colour = "black"),
-    axis.text.y = element_text(size = 6, colour = "black", margin = margin(r = 5)),
-    strip.text.x = element_text(size = 9, face = "bold"),
-    strip.background = element_rect(fill = NA),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-  )
-
-plot
-#ggsave("../Plots/sqrt_bmd_results.png", plot, width = 15, height = 10,units = "cm")
-```
-
-# Pearson analysis 0.9 pie charts
+##0.9 pie charts
 ```{r}
 # List of replicate folders — update paths/names as needed
 rep_dirs <- c(
@@ -423,12 +333,35 @@ retained_features <- imap(rep_files, function(path, rep_name) {
 
 # Fit and plot the Euler diagram
 fit <- euler(retained_features)
+venn_colors <- scales::hue_pal()(3)
 
-plot(fit,
-     quantities = TRUE,
-     fills = list(fill = c("#66C2A5", "#FC8D62", "#8DA0CB"), alpha = 0.6),
-     labels = list(font = 2),
-     main = "Overlap of features retained after 0.9 Pearson filter")
+venn <- plot(fit,
+     quantities = list(
+       type = c("counts", "percent"),   # matches "n (pct%)" style from donut labels
+       cex = 0.9,
+       font = 2                          # bold, matches label_txt bold in donut
+     ),
+          fills = list(
+       fill = venn_colors,
+       alpha = 0.7
+     ),
+     edges = list(
+       col = "white",                     # white borders between regions, matches geom_col(color="white")
+       lwd = 2                            # thicker edge, matches segment.size bump you did earlier
+     ),
+     main = list(
+       label = "Overlap of features retained after 0.9 Pearson filter",
+       fontface = 2,                      # bold title, consistent weight with donut titles
+       cex = 1
+     ),
+     legend = list(
+       side = "right"                     # optional: moves category names to a side legend
+                                            # instead of on-diagram labels, matching donut's legend.position="right"
+     )
+)
+
+venn
+ggsave("../Plots/cellprofiler/cellprofiler_venn_0.9.png", venn, width = 10, height = 10,units = "cm")
 
 # --- Subset each rep down to the features common to all three ---
 
@@ -452,6 +385,7 @@ iwalk(rep_common, function(df, rep_name) {
 
 feature_breakdown <- tibble(feature = common_features) %>%
   mutate(
+     feature_base = str_remove(feature, "_(cells|cytoplasm|nuclei)$"),
     module = str_extract(feature, "^[^_]+"),
     region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
     channel1 = case_when(
@@ -481,42 +415,66 @@ feature_breakdown <- feature_breakdown %>%
       channel1
     )
   )
-
-
+#function to make to pies
 make_pie <- function(df, group_col, title) {
   counts <- df %>%
     dplyr::count(.data[[group_col]], name = "n") %>%
     dplyr::filter(!is.na(.data[[group_col]])) %>%
-    dplyr::mutate(pct = n / sum(n) * 100)
+    dplyr::arrange(desc(.data[[group_col]])) %>%
+    dplyr::mutate(
+      pct = n / sum(n) * 100,
+      ymax = cumsum(n),
+      ymin = c(0, head(ymax, n = -1)),
+      label_pos = (ymax + ymin) / 2,
+      label_txt = paste0(n, " (", round(pct, 1), "%)")
+    )
 
-  ggplot(counts, aes(x = "", y = n, fill = .data[[group_col]])) +
+  # build one shared palette so fill and text color always match
+  n_groups <- dplyr::n_distinct(counts[[group_col]])
+  palette  <- scales::hue_pal()(n_groups)
+  names(palette) <- unique(counts[[group_col]])
+
+  ggplot(counts, aes(x = 2, y = n, fill = .data[[group_col]])) +
     geom_col(width = 1, color = "white") +
     coord_polar(theta = "y") +
-    geom_text(aes(label = paste0(n, " (", round(pct, 1), "%)")),
-              position = position_stack(vjust = 0.5), size = 3) +
+    xlim(0.5, 3.6) +
+    geom_label_repel(
+      aes(y = label_pos, label = label_txt, color = .data[[group_col]]),  # <- match text color
+      #x = 3.4,
+      size = 3,
+      fontface = "bold",              # helps colored text stay legible
+      show.legend = FALSE,
+      segment.color = "grey20",       # keep lines neutral so they don't blend into slices
+      segment.size = 0.8,
+      min.segment.length = 0,
+      box.padding = 0.4,
+      label.size = NA,
+      fill = alpha("white", 0.85),    # label background stays white/light
+      max.overlaps = Inf
+    ) +
+    scale_fill_manual(values = palette) +
+    scale_color_manual(values = palette, guide = "none") +   # same palette, no separate legend
     labs(title = title, fill = group_col) +
-    theme_void()
+    theme_void() +
+    theme(legend.position = "right")
 }
-
-# 1. Distribution by module (e.g., AreaShape, Intensity, Texture, Correlation, Granularity, RadialDistribution)
+# Module plot
 p_module <- make_pie(feature_breakdown, "module",
-                      "Feature module distribution (common features, 0.9 Pearson filter)")
+                      "Feature module distribution (0.9 Pearson filter)")
 p_module
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_module_0.9.png", p_module, width = 12, height = 12,units = "cm")
 
-# 2. Distribution by region (cells / cytoplasm / nuclei)
+# Region plot
 p_region <- make_pie(feature_breakdown, "region",
-                      "Feature region distribution (common features)")
+                      "Feature region distribution (0.9 Pearson filter)")
 p_region
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_region_0.9.png", p_region, width = 12, height = 12,units = "cm")
 
-# 3. Distribution by channel1 (primary channel: AGP, ER, DNA, Mito, RNA)
-p_channel1 <- make_pie(feature_breakdown, "channel1",
-                        "Feature channel distribution (common features)")
-p_channel1
-
+#Channel plot
 p_channel_pair <- make_pie(feature_breakdown, "channel_pair",
-                            "Feature channel distribution (common features)")
-
+                            "Feature channel distribution (0.9 Pearson filter)")
 p_channel_pair
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_channel_0.9.png", p_channel_pair, width = 12, height = 12,units = "cm")
 
 #checking the totals
 check_total <- function(df, group_col) {
@@ -542,7 +500,7 @@ module_counts_09 <- feature_breakdown %>%
   dplyr::mutate(pct_after = n_after / sum(n_after) * 100)
 
 ```
-#No Pearson analysis pie charts
+##None pie charts
 ```{r}
 # List of replicate folders — update paths/names as needed
 rep_dirs <- c(
@@ -587,6 +545,7 @@ rep_common <- imap(rep_files, function(path, rep_name) {
 
 feature_breakdown <- tibble(feature = common_features) %>%
   mutate(
+    feature_base = str_remove(feature, "_(cells|cytoplasm|nuclei)$"),
     module = str_extract(feature, "^[^_]+"),
     region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
     channel1 = case_when(
@@ -618,40 +577,69 @@ feature_breakdown <- feature_breakdown %>%
   )
 
 
+
 make_pie <- function(df, group_col, title) {
   counts <- df %>%
     dplyr::count(.data[[group_col]], name = "n") %>%
     dplyr::filter(!is.na(.data[[group_col]])) %>%
-    dplyr::mutate(pct = n / sum(n) * 100)
+    dplyr::arrange(desc(.data[[group_col]])) %>%
+    dplyr::mutate(
+      pct = n / sum(n) * 100,
+      ymax = cumsum(n),
+      ymin = c(0, head(ymax, n = -1)),
+      label_pos = (ymax + ymin) / 2,
+      label_txt = paste0(n, " (", round(pct, 1), "%)")
+    )
 
-  ggplot(counts, aes(x = "", y = n, fill = .data[[group_col]])) +
+  # build one shared palette so fill and text color always match
+  n_groups <- dplyr::n_distinct(counts[[group_col]])
+  palette  <- scales::hue_pal()(n_groups)
+  names(palette) <- unique(counts[[group_col]])
+
+  ggplot(counts, aes(x = 2, y = n, fill = .data[[group_col]])) +
     geom_col(width = 1, color = "white") +
     coord_polar(theta = "y") +
-    geom_text(aes(label = paste0(n, " (", round(pct, 1), "%)")),
-              position = position_stack(vjust = 0.5), size = 3) +
+    xlim(0.5, 3.6) +
+    geom_label_repel(
+      aes(y = label_pos, label = label_txt, color = .data[[group_col]]),  # <- match text color
+      #x = 3.4,
+      size = 3,
+      fontface = "bold",              # helps colored text stay legible
+      show.legend = FALSE,
+      segment.color = "grey20",       # keep lines neutral so they don't blend into slices
+      segment.size = 0.8,
+      min.segment.length = 0,
+      box.padding = 0.4,
+      label.size = NA,
+      fill = alpha("white", 0.85),    # label background stays white/light
+      max.overlaps = Inf
+    ) +
+    scale_fill_manual(values = palette) +
+    scale_color_manual(values = palette, guide = "none") +   # same palette, no separate legend
     labs(title = title, fill = group_col) +
-    theme_void()
+    theme_void() +
+    theme(legend.position = "right")
 }
 
-# 1. Distribution by module (e.g., AreaShape, Intensity, Texture, Correlation, Granularity, RadialDistribution)
+# Module plot
 p_module <- make_pie(feature_breakdown, "module",
-                      "Feature module distribution (183 common features, 0.9 Pearson filter)")
+                      "Feature module distribution (No Pearson filter)")
 p_module
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_module_noPC.png", p_module, width = 12, height = 12,units = "cm")
 
-# 2. Distribution by region (cells / cytoplasm / nuclei)
+# Region plot
 p_region <- make_pie(feature_breakdown, "region",
-                      "Feature region distribution (183 common features)")
+                      "Feature region distribution (No Pearson filter)")
 p_region
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_region_noPC.png", p_region, width = 12, height = 12,units = "cm")
 
-# 3. Distribution by channel1 (primary channel: AGP, ER, DNA, Mito, RNA)
-p_channel1 <- make_pie(feature_breakdown, "channel1",
-                        "Feature channel distribution (183 common features)")
-p_channel1
-
+#Channel plot
 p_channel_pair <- make_pie(feature_breakdown, "channel_pair",
-                            "Feature channel distribution (183 common features)")
-
+                            "Feature channel distribution (No Pearson filter)")
 p_channel_pair
+ggsave("../Plots/cellprofiler/cellprofiler_piechart_channel_noPC.png", p_channel_pair, width = 12, height = 12,units = "cm")
+
+
 
 #checking the totals
 check_total <- function(df, group_col) {
@@ -678,7 +666,7 @@ module_counts_none <- feature_breakdown %>%
   dplyr::mutate(pct_before = n_before / sum(n_before) * 100)
 ```
 
-##Retention
+###Retention
 ```{r}
 module_retention <- module_counts_none %>%
   dplyr::full_join(module_counts_09, by = "module") %>%
@@ -693,8 +681,873 @@ module_retention <- module_counts_none %>%
   dplyr::arrange(desc(n_before))
 
 module_retention
+
+module_retention %>%
+  filter(!is.na(retention_rate)) %>%
+  mutate(
+    module = reorder(module, retention_rate),
+    label = paste0(sprintf("%.1f", retention_rate), "%  (", n_after, "/", n_before, ")"),
+  ) %>%
+  ggplot(aes(y = module)) +
+  # background bar = n_before (context / starting size)
+  geom_col(aes(x = n_before), fill = "grey85") +
+  # foreground bar = n_after (overlapping, narrower/darker)
+  geom_col(aes(x = n_after),  fill= "orange", col = "orange",width = 0.7, alpha= 0.5) +
+  geom_text(aes(x = n_before, label = label), hjust = -0.05, size = 3) +
+  scale_x_log10(expand = expansion(mult = c(0, 0.35))) +
+  theme_bw() +
+  labs(x = "Number of features (grey = before, colour = after)", y = NULL,
+       title = "Feature retention per module after 10% threshold")
+```
+
+#Columbus
+##SQRT Mal
+```{r}
+columbus<- read.csv("../Input/Definitive_study_BMC_sqrt_vs_nosqrt.csv")
+
+columbus <- columbus %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "Sqrt"))) %>%
+  mutate(source = "Columbus") %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  ) %>%
+  bind_rows(
+    tibble::tibble(
+      name = c("Sorbitol", "Metoclopramide"),
+      source = "Columbus"
+  ))
+  
+
+
+columbus <- columbus %>% 
+  mutate(is_sqrt = Sqrt == "Squarerooted") %>%
+  dplyr::select(-Sqrt)
+
+columbus <- columbus %>%
+  dplyr::filter(exp %in% c(
+    "Definitive_rep1",
+    "Definitive_rep2",
+    "Definitive_rep3",
+    "MD_sqrt_rep1",
+    "MD_sqrt_rep2",
+    "MD_sqrt_rep3"
+  ) | is.na(exp)) %>%
+  dplyr::mutate(
+    exp = dplyr::case_when(
+      exp %in% c("Definitive_rep1", "MD_sqrt_rep1") ~ "rep1",
+      exp %in% c("Definitive_rep2", "MD_sqrt_rep2") ~ "rep2",
+      exp %in% c("Definitive_rep3", "MD_sqrt_rep3") ~ "rep3",
+      is.na(exp) ~ NA_character_
+    )) %>%
+     dplyr::mutate(name = forcats::fct_relevel(factor(name), top_names, after = Inf)
+  )
+
+custom_colors_named <- c(
+  "FALSE"     = "#440154",
+  "TRUE"   = "#21918c")
+
+columbus_plot <- ggplot(columbus, aes(x = bmd, y = name, colour = is_sqrt, shape = exp)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10(
+  breaks = scales::breaks_log(n = 5),
+  labels = scales::label_scientific()
+) +
+scale_colour_manual(
+    name = "is_sqrt",
+    values = custom_colors_named,
+    breaks = c(names(custom_colors_named))   # keeps ordering & NA in legend
+  ) +
+  theme_bw() +
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+columbus_plot
+ggsave("../Plots/columbus/sqrt_bmd_results_columbus.png", columbus_plot, width = 20, height = 10,units = "cm")
+```
+##Load data
+```{r}
+# Load tcplfit results from a given rep's folder. Written as a self-contained
+# function (rather than reassigning a shared `tcpl_results_folder` variable
+# before each rep's `list.files()` call) so a stray edit or out-of-order
+# chunk execution can't silently pull one rep's data from another rep's
+# folder (or a non-folder path).
+load_tcpl_folder <- function(folder) {
+  list.files(folder, pattern = "\\.csv$", full.names = TRUE) |>
+    map_dfr(function(path) {
+      label <- basename(path) |>
+        str_remove("^tcpl_results") |>
+        str_remove("\\.csv$")
+
+      read.csv(path) |>
+        mutate(
+          pearson_thresh  = str_extract(label, "[0-9.]+") |> as.numeric(),
+          source_file    = basename(path),
+          source_folder   = folder
+        )
+    })
+}
+rep1 <- load_tcpl_folder("../Input/pearson_tcplfit2/rep1")
+rep1$exp <- "rep1"
+rep2 <- load_tcpl_folder("../Input/pearson_tcplfit2/rep2")
+rep2$exp <- "rep2"
+rep3 <- load_tcpl_folder("../Input/pearson_tcplfit2/rep3")
+rep3$exp <- "rep3"
+joined <- rbind(rep1, rep2, rep3) %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  )
+
+
+#filtering
+  joined <- joined %>%
+    dplyr::mutate(
+      minDose = min(conc, na.rm = TRUE),
+      maxDose = max(conc, na.rm = TRUE),
+      removal_reason = dplyr::case_when(
+        hitcall < 0.9   ~ "low_hitcall",
+        is.na(bmdl)     ~ "missing_bmdl",
+        is.na(bmdu)     ~ "missing_bmdu",
+        TRUE            ~ "kept"
+      ),
+      keep = removal_reason == "kept",
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA),
+      exp = exp
+    )
+```
+###plot pearsons
+```{r}
+custom_colors_named <- c(
+  "0.5"     = "#440154",
+  "0.6" = "#3e4989",
+  "0.7"   = "#21918c",
+  "0.8"     = "#5ec962",
+  "0.9"   = "#fde725"
+)
+
+all_results <- joined %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "pearson_thresh"))) %>%
+     dplyr::filter(!is.na(name), trimws(name) != "") %>%
+   dplyr::mutate(name = forcats::fct_relevel(factor(name), top_names, after = Inf))
+
+
+
+
+plot <- ggplot(all_results, aes(x = bmd, y = name, colour = factor(pearson_thresh))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10(
+  breaks = scales::breaks_log(n = 3),
+  labels = scales::label_scientific()
+) +
+scale_colour_manual(
+    name = "pearson_thresh",
+    values = custom_colors_named,
+    na.value = "red",
+    na.translate = TRUE,
+    breaks = c(names(custom_colors_named), NA)   # keeps ordering & NA in legend
+  ) +
+  theme_bw() +
+  facet_wrap(~exp)+
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+plot
+ggsave("../Plots/columbus/columbus_multiplePC.png", plot, width = 20, height = 10,units = "cm")
+
+
+```
+####checks
+```{r}
+# remove non responded chems
+
+all_results <- all_results %>%
+    dplyr::filter(!name %in% c("Metoclopramide", "Sorbitol", "5-Nitro-2-(3-phenylpropylamino)benzoic acid"))
+# CI width per chemical x threshold
+ci_width_by_chem <- all_results %>%
+  filter(!is.na(bmd), !is.na(bmdl), !is.na(bmdu)) %>%
+  mutate(log_ci_width = log10(bmdu) - log10(bmdl)) %>%
+  group_by(name, pearson_thresh) %>%
+  summarise(mean_log_ci_width = mean(log_ci_width, na.rm = TRUE), .groups = "drop")
+
+
+# Reproducibility (log BMD SD) per chemical x threshold — already per-chemical
+reproducibility_by_chem <- all_results %>%
+  filter(!is.na(bmd)) %>%
+  group_by(name, pearson_thresh) %>%
+  summarise(
+    n_reps = n(),
+    log_bmd_sd = sd(log10(bmd), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(n_reps >= 2)
+
+# --- Combine into one long table for faceted plotting ---
+by_chem_comparison <- ci_width_by_chem %>%
+  full_join(reproducibility_by_chem %>% rename(mean_log_bmd_sd = log_bmd_sd),
+            by = c("name", "pearson_thresh")) %>%
+  arrange(name, pearson_thresh)
+
+by_chem_comparison
+
+# --- PLOT: one line per chemical, faceted by metric ---
+na_placeholder <- min(by_chem_comparison$pearson_thresh, na.rm = TRUE) + 0.5
+
+pearson_analysis <- by_chem_comparison %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
+  ) %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  ggplot(aes(x = pearson_thresh_plot, y = value, colour = name, group = name)) +
+  geom_line(alpha = 0.6) +
+  geom_point(size = 1.5, alpha = 0.7) +
+  scale_x_continuous(
+    breaks = c(na_placeholder, sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)]))),
+    labels = c("NA", sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)])))
+  ) +
+   scale_color_viridis_d() +
+  facet_wrap(~metric, scales = "free_y", ncol = 1) +
+     theme_bw() +
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+  labs(x = "Pearson correlation threshold", y = NULL)
+pearson_analysis
+ggsave("../Plots/columbus/chemical_pearson_analysis.png", pearson_analysis, width = 14, height = 10,units = "cm")
+
+# --- Average across chemicals, using the SAME per-chemical data as the individual lines ---
+avg_across_chem <- by_chem_comparison %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  group_by(pearson_thresh, metric) %>%
+  summarise(avg_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+# --- PLOT: individual chemical lines (thin, grey) + average overlay (bold, black) ---
+na_placeholder <- max(by_chem_comparison$pearson_thresh, na.rm = TRUE) + 0.1
+by_chem_long <- by_chem_comparison %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
+  ) %>%
+  pivot_longer(cols = c(mean_log_ci_width, mean_log_bmd_sd),
+               names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value))
+
+avg_across_chem_plot <- avg_across_chem %>%
+  mutate(
+    is_na_thresh = is.na(pearson_thresh),
+    pearson_thresh_plot = if_else(is_na_thresh, na_placeholder, pearson_thresh)
+  )
+
+pearson_analysis<- ggplot() +
+  geom_line(data = by_chem_long,
+            aes(x = pearson_thresh_plot, y = value, group = name),
+            colour = "grey75", alpha = 0.6) +
+  geom_point(data = by_chem_long,
+             aes(x = pearson_thresh_plot, y = value, group = name),
+             colour = "grey75", size = 1, alpha = 0.5) +
+  geom_line(data = avg_across_chem_plot,
+            aes(x = pearson_thresh_plot, y = avg_value, group = metric),
+            colour = "red", linewidth = 1) +
+  geom_point(data = avg_across_chem_plot,
+             aes(x = pearson_thresh_plot, y = avg_value, group = metric),
+             colour = "red", size = 2.5) +
+  scale_x_continuous(
+    breaks = c(na_placeholder, sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)]))),
+    labels = c("NA", sort(unique(by_chem_comparison$pearson_thresh[!is.na(by_chem_comparison$pearson_thresh)])))
+  ) +
+  facet_wrap(~metric, scales = "free_y", ncol = 1) +
+  theme_bw() +
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  ) +
+  labs(x = "Pearson correlation threshold", y = NULL)
+
+pearson_analysis
+ggsave("../Plots/columbus/mean_pearson_analysis.png", pearson_analysis, width = 10, height = 10,units = "cm")
 ```
 
 
+##NEW V OLD PIPELINE COMPARE
+```{r}
+##new pipeline
+columbus_rep1 <- read.csv("../Input/pearson_tcplfit2/rep1/0.9_Global fitting Mahalanobis - tcplResult.csv")
+columbus_rep2 <- read.csv("../Input/pearson_tcplfit2/rep2/PR_0.9_Global fitting Mahalanobis - tcplResult.csv")
+columbus_rep2$exp <- "rep2"
+columbus_rep3 <- read.csv("../Input/pearson_tcplfit2/rep3/PR_0.9_Global fitting Mahalanobis - tcplResult.csv")
+columbus_rep3$exp <- "rep3"
+columbus_new <- rbind(columbus_rep1, columbus_rep2, columbus_rep3)
+
+columbus_new <- columbus_new %>%
+  select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "hitcall"))) %>%
+  mutate(source = "New_pipeline") %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  ) %>%
+  mutate(name = forcats::fct_relevel(factor(name), top_names, after = Inf))
+
+#filtering tcplfit2 results
+columbus_new <- columbus_new %>%
+  dplyr::mutate(
+      removal_reason = dplyr::case_when(
+        hitcall < 0.9   ~ "low_hitcall",
+        is.na(bmdl)     ~ "missing_bmdl",
+        is.na(bmdu)     ~ "missing_bmdu",
+        TRUE            ~ "kept"
+      ),
+      keep = removal_reason == "kept",
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA)) %>%
+      dplyr::select(-c(hitcall, keep, removal_reason))
 
 
+############original pipeline 
+columbus_orig<- read.csv("../Input/Definitive_study_BMC_sqrt_vs_nosqrt.csv")
+
+columbus_orig <- columbus_orig %>%
+  dplyr::select(any_of(c("bmd", "name", "bmdl", "bmdu", "exp", "Sqrt"))) %>%
+  mutate(source = "Original_pipeline") %>%
+  mutate(
+    name = ifelse(name == "Taxol (Paclitaxel)", "Taxol", name),
+    name = ifelse(name == "Berberine Chloride", "Berberine chloride", name)
+  ) %>%
+  bind_rows(
+    tibble::tibble(
+      name = c("Sorbitol", "Metoclopramide"),
+      source = "Original_pipeline"
+  ))
+  
+columbus_orig <- columbus_orig %>% 
+  mutate(is_sqrt = Sqrt == "Squarerooted") %>%
+  dplyr::select(-Sqrt) %>%
+  filter(is_sqrt == FALSE)
+
+columbus_orig <- columbus_orig %>%
+  dplyr::filter(exp %in% c(
+    "Definitive_rep1",
+    "Definitive_rep2",
+    "Definitive_rep3"
+  ) | is.na(exp)) %>%
+  dplyr::mutate(
+    exp = dplyr::case_when(
+      exp %in% "Definitive_rep1" ~ "rep1",
+      exp %in% "Definitive_rep2" ~ "rep2",
+      exp %in% "Definitive_rep3" ~ "rep3",
+      is.na(exp) ~ NA_character_
+    )) %>%
+  dplyr::mutate(name = forcats::fct_relevel(factor(name), top_names, after = Inf)) %>%
+  dplyr::select(-is_sqrt)
+
+columbus <- rbind(columbus_orig, columbus_new)
+
+custom_colors_named <- c(
+  "Original_pipeline"     = "#440154",
+  "New_pipeline"   = "#21918c")
+plot <- ggplot(columbus, aes(x = bmd, y = name, colour = source, shape = exp)) +
+  geom_point(size = 2) +
+  scale_colour_manual(
+    name = "is_sqrt",
+    values = custom_colors_named,
+    breaks = c(names(custom_colors_named))   # keeps ordering & NA in legend
+  ) +
+  geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+  scale_x_log10() +
+  theme_bw() +
+ theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+     axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  ) 
+
+plot
+
+ggsave("../Plots/columbus/sqrt_pearson0.9_results_columbus.png", plot, width = 20, height = 10,units = "cm")
+```
+
+##0.9 pie charts
+```{r}
+# List of replicate folders — update paths/names as needed
+rep_dirs <- c(
+  rep1 = "../Input/pearson_cutoffs_well_level/rep1",
+  rep2 = "../Input/pearson_cutoffs_well_level/rep2",
+  rep3 = "../Input/pearson_cutoffs_well_level/rep3"
+)
+
+rep_files <- file.path(rep_dirs, "test_chem_pearson_0.9.csv")
+names(rep_files) <- names(rep_dirs)
+# Read files and add Metadata_ prefix to first 3 columns
+rep_data  <- lapply(rep_files, function(file) {
+  df <- read.csv(file)
+  
+  names(df)[1:3] <- paste0("Metadata_", names(df)[1:3])
+  
+  df
+})
+
+names(rep_data) <- names(rep_files)
+
+# Read each file and extract the set of retained feature names (non-metadata)
+retained_features <- imap(rep_data, function(df, rep_name) {
+  names(df)[!str_detect(names(df), "^Metadata_")]
+})
+# Fit and plot the Euler diagram
+fit <- euler(retained_features)
+venn_colors <- viridisLite::viridis(3)
+
+venn <- plot(fit,
+     quantities = list(
+       type = c("counts", "percent"),   # matches "n (pct%)" style from donut labels
+       cex = 0.9,
+       font = 2                          # bold, matches label_txt bold in donut
+     ),
+          fills = list(
+       fill = venn_colors,
+       alpha = 0.7
+     ),
+     edges = list(
+       col = "white",                     # white borders between regions, matches geom_col(color="white")
+       lwd = 2                            # thicker edge, matches segment.size bump you did earlier
+     ),
+     main = list(
+       label = "Overlap of features retained after 0.9 Pearson filter",
+       fontface = 2,                      # bold title, consistent weight with donut titles
+       cex = 1
+     ),
+     legend = list(
+       side = "right"                     # optional: moves category names to a side legend
+                                            # instead of on-diagram labels, matching donut's legend.position="right"
+     )
+)
+
+venn
+ggsave("../Plots/columbus/columbus_venn_0.9.png", venn, width = 10, height = 10,units = "cm")
+
+# --- Subset each rep down to the features common to all three ---
+
+# Intersection of feature names across all three reps
+common_features <- reduce(retained_features, intersect)
+length(common_features)  # should be 183
+
+# Re-read each rep's full retained file (rows + all its own retained columns),
+# then subset to metadata + the common feature set
+rep_common <- imap(rep_data, function(df, rep_name) {
+  meta_cols <- names(df)[str_detect(names(df), "^Metadata_")]
+  
+  df %>%
+    dplyr::select(
+      all_of(meta_cols),
+      all_of(common_features)
+    )
+})
+
+# Write out the subsetted files, one per rep, into their own folders
+iwalk(rep_common, function(df, rep_name) {
+  write_csv(df, file.path(rep_dirs[[rep_name]], "test_chem_well_pearson_0.9_common.csv"))
+})
+
+
+module <- c(
+  "Axial", "Compactness", "Radial", "Symmetry", "Gabor",
+  "Haralick", "SER", "Intensity", "intensity", "Profile",
+  "Ratio", "Length", "Width", "Roundness", "Area",
+  "position", "Position", "Texture", "Morph"
+)
+
+feature_breakdown <- tibble(feature = common_features) %>%
+  mutate(
+    module = str_extract(
+      feature,
+      paste(module, collapse = "|")
+    ),
+        region = str_extract(
+      feature,
+      regex("Cell|Cytoplasm|Nucleus|Ring|Membrane", ignore_case = TRUE)
+    ),
+    channel = str_extract(feature, "(AGP|ER|DNA|Mito|RNA)")
+  ) %>%
+    mutate(
+    module = ifelse(module == "position", "Position", module),
+    module = ifelse(module == "intensity", "Intensity", module)
+  )%>%
+  mutate(across(c(module, region, channel), as.character)) 
+
+feature_breakdown['module'][feature_breakdown['module']=="Gabor"|feature_breakdown['module']=="Haralick"|feature_breakdown['module']=="SER"] <- "Texture"
+
+#function to make to pies
+make_pie <- function(df, group_col, title) {
+  counts <- df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::filter(!is.na(.data[[group_col]])) %>%
+    dplyr::arrange(desc(.data[[group_col]])) %>%
+    dplyr::mutate(
+      pct = n / sum(n) * 100,
+      ymax = cumsum(n),
+      ymin = c(0, head(ymax, n = -1)),
+      label_pos = (ymax + ymin) / 2,
+      label_txt = paste0(n, " (", round(pct, 1), "%)")
+    )
+
+  # build one shared palette so fill and text color always match
+n_groups <- dplyr::n_distinct(counts[[group_col]])
+
+palette <- viridisLite::viridis(n_groups)
+names(palette) <- unique(counts[[group_col]])
+
+  ggplot(counts, aes(x = 2, y = n, fill = .data[[group_col]])) +
+    geom_col(width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    xlim(0.5, 3.6) +
+    geom_label_repel(
+      aes(y = label_pos, label = label_txt, color = .data[[group_col]]),  # <- match text color
+      #x = 3.4,
+      size = 3,
+      fontface = "bold",              # helps colored text stay legible
+      show.legend = FALSE,
+      segment.color = "grey20",       # keep lines neutral so they don't blend into slices
+      segment.size = 0.8,
+      min.segment.length = 0,
+      box.padding = 0.4,
+      label.size = NA,
+      fill = alpha("white", 0.85),    # label background stays white/light
+      max.overlaps = Inf
+    ) +
+    scale_fill_manual(values = palette) +
+    scale_color_manual(values = palette, guide = "none") +   # same palette, no separate legend
+    labs(title = title, fill = group_col) +
+    theme_void() +
+    theme(legend.position = "right")
+}
+
+#forcing specific coloring on this pie to make it match 
+all_modules <- c("Area", "Axial", "Compactness", "Intensity", "Length",
+                 "Position", "Profile", "Radial", "Ratio", "Roundness",
+                 "Symmetry", "Texture", "Width")
+module_colors <- setNames(viridis(length(all_modules), direction = -1), all_modules)
+p_module <- make_pie(feature_breakdown, "module",
+                      "Feature module distribution (0.9 Pearson filter)")
+p_module <- p_module +
+  scale_fill_manual(values = module_colors, drop = TRUE) +
+  scale_color_manual(values = module_colors, drop = TRUE)  # for the colored label text
+p_module
+ggsave("../Plots/columbus/columbus_piechart_module_0.9.png", p_module, width = 12, height = 12,units = "cm")
+
+# Region plot
+p_region <- make_pie(feature_breakdown, "region",
+                      "Feature region distribution (0.9 Pearson filter)")
+p_region
+ggsave("../Plots/columbus/columbus_piechart_region_0.9.png", p_region, width = 12, height = 12,units = "cm")
+
+
+
+p_channel <- make_pie(feature_breakdown, "channel",
+                            "Feature channel distribution (0.9 Pearson filter)")
+p_channel
+ggsave("../Plots/columbus/columbus_piechart_channel_0.9.png", p_channel, width = 12, height = 12,units = "cm")
+
+#checking the totals
+check_total <- function(df, group_col) {
+  df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::summarise(
+      total_n = sum(n),
+      total_incl_na = sum(n),
+      total_excl_na = sum(n[!is.na(.data[[group_col]])])
+    )
+}
+
+check_total(feature_breakdown, "module")
+check_total(feature_breakdown, "region")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel")
+
+
+module_counts_09 <- feature_breakdown %>%
+  dplyr::count(module, name = "n_after") %>%
+  dplyr::mutate(pct_after = n_after / sum(n_after) * 100)
+
+```
+
+##None pie charts
+```{r}
+# List of replicate folders — update paths/names as needed
+rep_dirs <- c(
+  rep1 = "../Input/pearson_cutoffs_well_level/rep1",
+  rep2 = "../Input/pearson_cutoffs_well_level/rep2",
+  rep3 = "../Input/pearson_cutoffs_well_level/rep3"
+)
+rep_files <- file.path(rep_dirs, "test_chem_pearson_none.csv")
+names(rep_files) <- names(rep_dirs)
+# Read files and add Metadata_ prefix to first 3 columns
+rep_data  <- lapply(rep_files, function(file) {
+  df <- read.csv(file)
+  
+  names(df)[1:3] <- paste0("Metadata_", names(df)[1:3])
+  
+  df
+})
+
+names(rep_data) <- names(rep_files)
+
+# Read each file and extract the set of retained feature names (non-metadata)
+retained_features <- imap(rep_data, function(df, rep_name) {
+  names(df)[!str_detect(names(df), "^Metadata_")]
+})
+# Fit and plot the Euler diagram
+fit <- euler(retained_features)
+venn_colors <- viridisLite::viridis(3)
+
+venn <- plot(fit,
+     quantities = list(
+       type = c("counts", "percent"),   # matches "n (pct%)" style from donut labels
+       cex = 0.9,
+       font = 2                          # bold, matches label_txt bold in donut
+     ),
+          fills = list(
+       fill = venn_colors,
+       alpha = 0.7
+     ),
+     edges = list(
+       col = "white",                     # white borders between regions, matches geom_col(color="white")
+       lwd = 2                            # thicker edge, matches segment.size bump you did earlier
+     ),
+     main = list(
+       label = "Overlap of features retained after no Pearson filter",
+       fontface = 2,                      # bold title, consistent weight with donut titles
+       cex = 1
+     ),
+     legend = list(
+       side = "right"                     # optional: moves category names to a side legend
+                                            # instead of on-diagram labels, matching donut's legend.position="right"
+     )
+)
+
+
+venn
+ggsave("../Plots/columbus/columbus_venn_none.png", venn, width = 10, height = 10,units = "cm")
+
+# --- Subset each rep down to the features common to all three ---
+
+# Intersection of feature names across all three reps
+common_features <- reduce(retained_features, intersect)
+length(common_features)  # should be 183
+
+# Re-read each rep's full retained file (rows + all its own retained columns),
+# then subset to metadata + the common feature set
+rep_common <- imap(rep_data, function(df, rep_name) {
+  meta_cols <- names(df)[str_detect(names(df), "^Metadata_")]
+  
+  df %>%
+    dplyr::select(
+      all_of(meta_cols),
+      all_of(common_features)
+    )
+})
+
+# Write out the subsetted files, one per rep, into their own folders
+iwalk(rep_common, function(df, rep_name) {
+  write_csv(df, file.path(rep_dirs[[rep_name]], "test_chem_well_pearson_0.9_common.csv"))
+})
+
+
+module <- c(
+  "Axial", "Compactness", "Radial", "Symmetry", "Gabor",
+  "Haralick", "SER", "Intensity", "intensity", "Profile",
+  "Ratio", "Length", "Width", "Roundness", "Area",
+  "position", "Position", "Texture", "Morph"
+)
+
+feature_breakdown <- tibble(feature = common_features) %>%
+  mutate(
+    module = str_extract(
+      feature,
+      paste(module, collapse = "|")
+    ),
+        region = str_extract(
+      feature,
+      regex("Cell|Cytoplasm|Nucleus|Ring|Membrane", ignore_case = TRUE)
+    ),
+    channel = str_extract(feature, "(AGP|ER|DNA|Mito|RNA)")
+  ) %>%
+    mutate(
+    module = ifelse(module == "position", "Position", module),
+    module = ifelse(module == "intensity", "Intensity", module)
+  )%>%
+  mutate(across(c(module, region, channel), as.character)) 
+
+feature_breakdown['module'][feature_breakdown['module']=="Gabor"|feature_breakdown['module']=="Haralick"|feature_breakdown['module']=="SER"] <- "Texture"
+
+#function to make to pies
+make_pie <- function(df, group_col, title) {
+  counts <- df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::filter(!is.na(.data[[group_col]])) %>%
+    dplyr::arrange(desc(.data[[group_col]])) %>%
+    dplyr::mutate(
+      pct = n / sum(n) * 100,
+      ymax = cumsum(n),
+      ymin = c(0, head(ymax, n = -1)),
+      label_pos = (ymax + ymin) / 2,
+      label_txt = paste0(n, " (", round(pct, 1), "%)")
+    )
+
+  # build one shared palette so fill and text color always match
+n_groups <- dplyr::n_distinct(counts[[group_col]])
+
+palette <- viridisLite::viridis(n_groups)
+names(palette) <- unique(counts[[group_col]])
+
+  ggplot(counts, aes(x = 2, y = n, fill = .data[[group_col]])) +
+    geom_col(width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    xlim(0.5, 3.6) +
+    geom_label_repel(
+      aes(y = label_pos, label = label_txt, color = .data[[group_col]]),  # <- match text color
+      #x = 3.4,
+      size = 3,
+      fontface = "bold",              # helps colored text stay legible
+      show.legend = FALSE,
+      segment.color = "grey20",       # keep lines neutral so they don't blend into slices
+      segment.size = 0.8,
+      min.segment.length = 0,
+      box.padding = 0.4,
+      label.size = NA,
+      fill = alpha("white", 0.85),    # label background stays white/light
+      max.overlaps = Inf
+    ) +
+    scale_fill_manual(values = palette) +
+    scale_color_manual(values = palette, guide = "none") +   # same palette, no separate legend
+    labs(title = title, fill = group_col) +
+    theme_void() +
+    theme(legend.position = "right")
+}
+# Module plot
+p_module <- make_pie(feature_breakdown, "module",
+                      "Feature module distribution (no Pearson filter)")
+p_module
+ggsave("../Plots/columbus/columbus_piechart_module_none.png", p_module, width = 12, height = 12,units = "cm")
+
+# Region plot
+p_region <- make_pie(feature_breakdown, "region",
+                      "Feature region distribution (no Pearson filter)")
+p_region
+ggsave("../Plots/columbus/columbus_piechart_region_none.png", p_region, width = 12, height = 12,units = "cm")
+
+#Channel plot
+p_channel <- make_pie(feature_breakdown, "channel",
+                            "Feature channel distribution (no Pearson filter)")
+p_channel
+ggsave("../Plots/columbus/columbus_piechart_channel_none.png", p_channel, width = 12, height = 12,units = "cm")
+
+#checking the totals
+check_total <- function(df, group_col) {
+  df %>%
+    dplyr::count(.data[[group_col]], name = "n") %>%
+    dplyr::summarise(
+      total_n = sum(n),
+      total_incl_na = sum(n),
+      total_excl_na = sum(n[!is.na(.data[[group_col]])])
+    )
+}
+
+check_total(feature_breakdown, "module")
+check_total(feature_breakdown, "region")
+
+#not every features has a dye
+check_total(feature_breakdown, "channel")
+
+
+module_counts_none <- feature_breakdown %>%
+  dplyr::count(module, name = "n_before") %>%
+  dplyr::mutate(pct_before = n_before / sum(n_before) * 100)
+```
+
+###Retention
+```{r}
+module_retention <- module_counts_none %>%
+  dplyr::full_join(module_counts_09, by = "module") %>%
+  dplyr::mutate(
+    n_before   = tidyr::replace_na(n_before, 0),
+    n_after    = tidyr::replace_na(n_after, 0),
+    pct_before = tidyr::replace_na(pct_before, 0),
+    pct_after  = tidyr::replace_na(pct_after, 0),
+    retention_rate = ifelse(n_before > 0, n_after / n_before * 100, NA_real_),
+    share_change   = pct_after - pct_before   # change in composition share, not retention
+  ) %>%
+  dplyr::arrange(desc(n_before))
+
+module_retention
+
+reten <- module_retention %>%
+  filter(!is.na(retention_rate)) %>%
+  mutate(
+    module = reorder(module, retention_rate),
+    label = paste0(sprintf("%.1f", retention_rate), "%  (", n_after, "/", n_before, ")"),
+  ) %>%
+  ggplot(aes(y = module)) +
+  # background bar = n_before (context / starting size)
+  geom_col(aes(x = n_before), fill = "#21918c") +
+  # foreground bar = n_after (overlapping, narrower/darker)
+  geom_col(aes(x = n_after),  fill= "#440154", col = "#440154",width = 0.7, alpha= 0.5) +
+  geom_text(aes(x = n_before, label = label), hjust = -0.05, size = 3) +
+  scale_x_log10(expand = expansion(mult = c(0, 0.35))) +
+  theme_bw() +
+   theme(
+    legend.position = "right",
+     axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black", margin = margin(r = 5)),
+    strip.text.x = element_text(size =10, face = "bold"),
+    strip.background = element_rect(fill = NA),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  ) +
+  labs(x = "Number of features (grey = before, colour = after)", y = NULL)
+ggsave("../Plots/columbus/retension.png", reten, width = 15, height = 10,units = "cm")
+
+```

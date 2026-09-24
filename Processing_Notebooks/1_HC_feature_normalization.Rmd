@@ -306,12 +306,17 @@ cytotoxic_conc <- cell_count_avg %>%
 test_chem_well <- test_chem_well %>%
   filter(!paste(Metadata_Chemical, Metadata_Concentration) %in% paste(cytotoxic_conc$Metadata_Chemical, cytotoxic_conc$Metadata_Concentration))
 
-#Eliminate feats with no variance across samples
-variances <- apply(test_chem_well, 2, var)
+
+# Eliminate features with no variance across samples
+metadata_cols <- 1:4
+feature_cols <- 5:ncol(test_chem_well)
+
+variances <- apply(test_chem_well[, feature_cols], 2, var, na.rm = TRUE)
+
 no_var <- which(variances == 0)
 
-if(length(no_var) != 0 & is.numeric(no_var)){
-  test_chem_well <- test_chem_well[, -no_var]
+if (length(no_var) > 0) {
+  test_chem_well <- test_chem_well[, - (feature_cols[no_var])]
 }
 ```
 
@@ -349,26 +354,8 @@ n_features_original <- ncol(feature_mat)
 
 
 
-##1. Low-variance filter
-```{r}
-# Drop features with (near-)zero variance across wells
-variance_threshold <- 1e-5
 
-variances <- matrixStats::colVars(feature_mat, na.rm = TRUE)
-keep_var  <- !is.na(variances) & variances > variance_threshold
-
-cat("Original features:", n_features_original, "\n")
-cat("Removed (low variance or all-NA):", sum(!keep_var), "\n")
-cat("Remaining after variance filter:", sum(keep_var), "\n")
-
-feature_mat_lowvar <- feature_mat[, keep_var, drop = FALSE]
-
-test_chem_well_lowvar <- bind_cols(metadata_df, as.data.frame(feature_mat_lowvar))
-
-write_csv(test_chem_well_lowvar, file.path(pipeline_output_path, "test_chem_well_lowvariance.csv"))
-```
-
-##2. Pearson correlation filter (pycytominer-style), multiple cutoffs
+#Pearson correlation filter (pycytominer-style), multiple cutoffs
 ```{r}
 # pycytominer's correlation_threshold flags pairs of features correlated
 # above `corr_threshold` and, for each flagged pair, drops the member with
@@ -416,6 +403,78 @@ iwalk(corr_results, function(res, name) {
 
 # Write the single "no threshold" file
 write_csv(corr_none, file.path(pipeline_output_path, "test_chem_well_pearson_none.csv"))
+
+
+features <- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %>%
+  mutate(
+     feature_base = str_remove(feature, "_(cells|cytoplasm|nuclei)$"),
+    module = str_extract(feature, "^[^_]+"),
+    region = str_extract(feature, "(cells|cytoplasm|nuclei)$"),
+    channel1 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 2],
+      TRUE ~ str_extract(feature, "_(AGP|ER|DNA|Mito|RNA)(_|$)") %>%
+               str_remove_all("_")
+    ),
+    channel2 = case_when(
+      module == "Correlation" ~
+        str_match(feature,
+          "^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_"
+        )[, 3],
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  mutate(across(c(module, region, channel1, channel2), as.character))
+
+# Build edge list of all feature pairs exceeding a given threshold
+build_corr_edges <- function(corr_matrix, thresh) {
+  corr_matrix[lower.tri(corr_matrix, diag = TRUE)] <- NA  # keep upper triangle only
+
+  which(abs(corr_matrix) > thresh, arr.ind = TRUE) %>%
+    as_tibble() %>%
+    mutate(
+      feature1 = rownames(corr_matrix)[row],
+      feature2 = colnames(corr_matrix)[col],
+      corr     = corr_matrix[cbind(row, col)]
+    ) %>%
+    select(feature1, feature2, corr)
+}
+
+# Label each edge as within- or between-module, and flag whether either
+# endpoint was actually dropped at that threshold
+annotate_edges <- function(edges, feature_breakdown, removed_features) {
+  edges %>%
+    left_join(feature_breakdown %>% select(feature, module1 = module), 
+               by = c("feature1" = "feature")) %>%
+    left_join(feature_breakdown %>% select(feature, module2 = module), 
+               by = c("feature2" = "feature")) %>%
+    mutate(
+      relationship = if_else(module1 == module2, "within_module", "between_module"),
+      feature1_removed = feature1 %in% removed_features,
+      feature2_removed = feature2 %in% removed_features,
+      involves_removed  = feature1_removed | feature2_removed
+    )
+}
+
+# Apply across thresholds
+edge_summaries <- map(names(corr_results), function(name) {
+  thresh <- as.numeric(str_remove(name, "pearson_"))
+  removed_features <- setdiff(colnames(corr_results[[name]]$removed), colnames(metadata_df))
+
+  edges <- build_corr_edges(corr_matrix_all, thresh) %>%
+    annotate_edges(feature_breakdown, removed_features)
+
+  edges %>%
+    filter(involves_removed) %>%
+    dplyr::count(relationship) %>%
+    mutate(threshold = thresh, prop = n / sum(n))
+})
+
+
+bind_rows(edge_summaries)
+
 ```
 
 

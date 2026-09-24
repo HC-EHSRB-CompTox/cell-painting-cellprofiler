@@ -11,7 +11,7 @@
 
 
 
-<title>2_Reformat_feature_names.knit</title>
+<title>4_Category-PCA-and-Mahalanobis-distances.knit</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -353,288 +353,623 @@ display: none;
 
 
 <p>#Load libraries</p>
-<pre class="r"><code>library(viridis)</code></pre>
-<pre><code>## Warning: package &#39;viridis&#39; was built under R version 4.3.3</code></pre>
-<pre class="r"><code>library(RColorBrewer)
-library(ggplot2)
+<pre class="r"><code>library(stats)
+library(factoextra)
+library(tcplfit2)
+library(patchwork)
 library(cowplot)
-library(data.table)</code></pre>
-<pre><code>## Registered S3 method overwritten by &#39;data.table&#39;:
-##   method           from
-##   print.data.table</code></pre>
-<pre><code>## data.table 1.17.8 using 8 threads (see ?getDTthreads).  Latest news: r-datatable.com
-## 
-## Attaching package: &#39;data.table&#39;
-## 
-## The following objects are masked from &#39;package:dplyr&#39;:
-## 
-##     between, first, last
-## 
-## The following object is masked from &#39;package:purrr&#39;:
-## 
-##     transpose</code></pre>
-<pre class="r"><code>library(tidyverse)</code></pre>
-<pre><code>## Warning: package &#39;tidyverse&#39; was built under R version 4.3.3</code></pre>
-<pre><code>## Warning: package &#39;forcats&#39; was built under R version 4.3.3</code></pre>
-<pre><code>## Warning: package &#39;lubridate&#39; was built under R version 4.3.3</code></pre>
-<pre><code>## ── Attaching core tidyverse packages ───────────────────────────────────────────────────────────── tidyverse 2.0.0 ──
-## ✔ forcats   1.0.0     ✔ lubridate 1.9.4
-## ── Conflicts ─────────────────────────────────────────────────────────────────────────────── tidyverse_conflicts() ──
-## ✖ foreach::accumulate()   masks purrr::accumulate()
-## ✖ data.table::between()   masks dplyr::between()
-## ✖ dplyr::combine()        masks gridExtra::combine()
-## ✖ dplyr::filter()         masks stats::filter()
-## ✖ data.table::first()     masks dplyr::first()
-## ✖ lubridate::hour()       masks data.table::hour()
-## ✖ lubridate::isoweek()    masks data.table::isoweek()
-## ✖ dplyr::lag()            masks stats::lag()
-## ✖ data.table::last()      masks dplyr::last()
-## ✖ lubridate::mday()       masks data.table::mday()
-## ✖ lubridate::minute()     masks data.table::minute()
-## ✖ lubridate::month()      masks data.table::month()
-## ✖ lubridate::quarter()    masks data.table::quarter()
-## ✖ lubridate::second()     masks data.table::second()
-## ✖ dplyr::select()         masks MASS::select()
-## ✖ lubridate::stamp()      masks cowplot::stamp()
-## ✖ data.table::transpose() masks purrr::transpose()
-## ✖ lubridate::wday()       masks data.table::wday()
-## ✖ lubridate::week()       masks data.table::week()
-## ✖ foreach::when()         masks purrr::when()
-## ✖ lubridate::yday()       masks data.table::yday()
-## ✖ lubridate::year()       masks data.table::year()
-## ℹ Use the conflicted package (&lt;http://conflicted.r-lib.org/&gt;) to force all conflicts to become errors</code></pre>
-<pre class="r"><code>library(dplyr)
-dir.create(
-  file.path(pipeline_output_path, &quot;feature_results&quot;),
+library(MASS)
+library(gridExtra)
+library(purrr)
+library(readr)
+library(tibble)  
+library(stringr)
+library(tidyr)
+library(viridisLite)</code></pre>
+<p>#SQRT Category level</p>
+<pre class="r"><code>dir.create(
+  file.path(pipeline_output_path, &quot;tcplfit_results_cat&quot;),
   showWarnings = FALSE,
   recursive = TRUE
-)</code></pre>
-<p>#Metadata check</p>
-<pre class="r"><code>input_files &lt;- list.files(
+)
+path &lt;- file.path(
   pipeline_output_path,
-  pattern = &quot;^test_chem_well.*\\.csv$&quot;,
-  full.names = TRUE
+  &quot;feature_results&quot;,
+  &quot;test_chem_cat_pearson_0.9_common.csv&quot;
 )
 
-check_results &lt;- map_dfr(input_files, function(path) {
-  # just read the header, no need to load full file
-  header &lt;- names(read_csv(path, n_max = 0, show_col_types = FALSE))
-  first4 &lt;- header[1:4]
+# --- Load the well-level data ---
+test_chem_well &lt;- read_csv(
+  path,
+  show_col_types = FALSE,
+  name_repair = &quot;minimal&quot;
+) |&gt;
+  as.data.frame()
 
-  tibble(
-    file = basename(path),
-    col1 = first4[1],
-    col2 = first4[2],
-    col3 = first4[3],
-    col4 = first4[4],
-    all_metadata = all(str_starts(first4, &quot;Metadata_&quot;)),
-    matches_expected = setequal(
-      first4,
-      c(&quot;Metadata_Chemical&quot;, &quot;Metadata_Concentration&quot;, &quot;Metadata_Well&quot;, &quot;Metadata_Plate&quot;)
+# First column contains row names
+rownames(test_chem_well) &lt;- test_chem_well[[1]]
+test_chem_well &lt;- test_chem_well[, -1]
+
+# --- Load the matching category labels ---
+ft_path &lt;- str_replace(
+  path,
+  &quot;\\.csv$&quot;,
+  &quot;_ft_colnames2.csv&quot;
+)
+
+ft_colnames2 &lt;- read_csv(
+  ft_path,
+  show_col_types = FALSE
+)$features
+
+
+well_data &lt;- test_chem_well
+
+#Transpose 
+test_chem_well_cat &lt;- t(test_chem_well) |&gt;
+  as.data.frame()
+
+# Add category labels as a COLUMN
+test_chem_well_cat &lt;- cbind(
+  features = ft_colnames2,
+  test_chem_well_cat
+)
+
+rownames(test_chem_well_cat) &lt;- NULL
+  
+#Filter out categories with fewer than 2 features ---
+cat_lev_data &lt;- test_chem_well_cat %&gt;%
+  group_by(features) %&gt;%
+  mutate(count = n()) %&gt;%
+  ungroup() %&gt;%
+  filter(count &gt; 1)
+cat_lev_data &lt;- cat_lev_data[,-c(ncol(cat_lev_data))]
+
+samples &lt;- colnames(cat_lev_data)[2:ncol(cat_lev_data)]
+
+ft_cats &lt;- unique(cat_lev_data$features)
+#Eliminate categories with no variance across samples
+
+cat_lev_data &lt;- lapply(ft_cats, function(x){
+  cat_dat &lt;- well_data[, grep(x, colnames(well_data))]
+  variances &lt;- apply(cat_dat, 2, var)
+  cat_dat &lt;- cat_dat[, variances != 0] 
+  cat_dat
+  }) %&gt;%
+  do.call(cbind,.)
+#PCA by category
+pca_cat &lt;- lapply(ft_cats, function(x){
+  cat_dat &lt;- cat_lev_data[, grep(x, colnames(cat_lev_data))]
+  pca &lt;- prcomp(cat_dat, center = TRUE, scale = TRUE)
+  return (pca)
+}) %&gt;%
+  setNames(ft_cats)
+
+cat_mahal_dist &lt;- lapply(ft_cats, function(x){
+  
+  pca &lt;- pca_cat[[x]]
+  
+  cumulative_prop &lt;- cumsum(pca$sdev^2)/sum(pca$sdev^2)
+  PC_95 &lt;- length(which(cumulative_prop&lt;0.95))+1
+  
+  pca_x &lt;- as.data.frame(pca$x)
+  pca_x &lt;- as.data.frame(cbind(chem = samples, pca_x)) 
+  
+  ctrl_pc &lt;- pca_x %&gt;% filter(grepl(ctrl_group, chem))
+  ctrl_pc &lt;- ctrl_pc[,-c(1)]
+  ctrl_mean &lt;- colMeans(ctrl_pc)
+  
+  cat_dat &lt;- well_data[, grep(x, colnames(well_data))]
+  zero_col &lt;- sapply(cat_dat, function(col) all(col == 0))
+  cat_dat &lt;- cat_dat[,!zero_col]
+  
+  dat &lt;- as.matrix(cat_dat) %*% pca$rotation[,1:PC_95]
+  
+  #Covariance Matrix
+  Cov &lt;- cov(dat)
+  
+  #Checkpoint
+  det(Cov)
+  isSymmetric(Cov)
+  
+  #Mahalanobis distance determination
+  
+  mahal_dist &lt;- mahalanobis(dat, ctrl_mean, Cov, inverted = F) 
+  
+  mahal_dist &lt;- as.data.frame(mahal_dist)
+  mahal_dist  &lt;- as.data.frame(sqrt(mahal_dist))
+  mahal_dist &lt;- cbind(chem = rownames(well_data), mahal_dist)
+  
+  sample_info &lt;- mahal_dist$chem
+  sample_info &lt;- tibble(sample_info) %&gt;%
+    separate(sample_info, c(&quot;chem&quot;, &quot;concentration&quot;, &quot;well&quot;, &quot;well2&quot;), sep = &quot;_&quot;, remove = T)
+  
+  sample_info$well &lt;- paste0(sample_info$well, &quot;_&quot;, sample_info$well2)
+  
+  mahal_dist &lt;- cbind(sample_info[1:3], mahal_dist = mahal_dist$mahal_dist)
+  
+  return(mahal_dist)
+  }) %&gt;%
+  setNames(ft_cats)</code></pre>
+<pre><code>## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;</code></pre>
+<pre class="r"><code>#pick one at random to pull chem list
+chem_list &lt;- unique(cat_mahal_dist[[&quot;cells_DNA_Granularity&quot;]][[&quot;chem&quot;]])
+
+# Separate categorical Mahalanobis distances by chemical
+mahal_dist_chem &lt;- lapply(chem_list, function(x){
+  chemical &lt;- x
+  
+  chem_dat &lt;- lapply(ft_cats, function(y){
+    chem_dat &lt;- filter(cat_mahal_dist[[y]], chem == chemical)
+    return(chem_dat)}) %&gt;%
+    setNames(ft_cats)
+  
+  chem_dat &lt;- do.call(rbind, chem_dat)
+  
+  return(chem_dat)}) %&gt;%
+  setNames(chem_list) %&gt;%
+  do.call(rbind, .)
+
+mahal_dist_chem$feat &lt;- rownames(mahal_dist_chem)
+mahal_dist_chem$feat &lt;- str_extract(mahal_dist_chem$feat, &quot;(?&lt;=\\.).*?(?=\\.)&quot;)
+rownames(mahal_dist_chem) &lt;- NULL
+
+
+#Per-chemical Mahalanobis plots
+#lapply(chem_list, function(x) {
+#  p &lt;- ggplot(
+#     mahal_dist_chem[mahal_dist_chem$chem == x, ],
+#      aes(x = as.numeric(concentration), y = mahal_dist, colour = feat)
+#    ) +
+#      geom_point() +
+#      scale_y_continuous() +
+#      scale_x_log10() +
+#       scale_color_manual(
+#    values = turbo(length(unique(mahal_dist_chem$feat)))
+#  ) +
+#      xlab(&quot;Concentration (\u03BCM)&quot;) + ylab(&quot;Mahalanobis Distance&quot;) +
+#      theme_classic() +
+#      theme(
+#        legend.position = &quot;none&quot;,
+#        axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+#        axis.title.y = element_text(size = 20, margin = margin(r = 15), angle = 90),
+#       axis.text.x = element_text(size = 11, colour = &quot;black&quot;),
+#        axis.text.y = element_text(size = 11, colour = &quot;black&quot;),
+#        strip.text.x = element_text(size = 12, face = &quot;bold&quot;),
+#        strip.background = element_rect(fill = NA),
+#        axis.line = element_line(linewidth = 1)
+#      ) +
+#      facet_wrap(vars(feat), scales = &quot;free&quot;) 
+
+# ggsave(
+#   filename = file.path(plots, paste0(x, file_label, &quot;_Categorical_mahalanobis.png&quot;)),
+#   plot = p, width = 45, height = 45, units = &quot;cm&quot;
+# )
+#  })
+
+#tcplfit2 concentration-response modeling per category ---
+mahal_dist_chem &lt;- as.data.frame(mahal_dist_chem)
+
+test_chem_res &lt;- mahal_dist_chem |&gt; dplyr::filter(chem != ctrl_group)
+
+conc_res_modeling &lt;- function(test_chem, vehicle_ctrl) {
+    row &lt;- list(
+      conc   = as.numeric(test_chem$concentration),
+      resp   = test_chem$mahal_dist,
+      bmed   = vehicle_ctrl$Median,
+      cutoff = vehicle_ctrl$nMad,
+      onesd  = vehicle_ctrl$nMad,
+      name   = paste0(test_chem$chem[1], &quot;_&quot;, test_chem$feat[1]),
+      assay  = &quot;Mahalanobis distance (cutoff = 1)&quot;
     )
-  )
-})
+    tcplfit2::concRespCore(
+      row, conthits = TRUE, aicc = TRUE, force.fit = FALSE, bidirectional = TRUE,
+      fitmodels = c(&quot;cnst&quot;, &quot;hill&quot;, &quot;poly1&quot;, &quot;poly2&quot;, &quot;pow&quot;, &quot;exp2&quot;, &quot;exp3&quot;, &quot;exp4&quot;, &quot;exp5&quot;)
+    )
+  }
 
-print(check_results)
+chem_list_i &lt;- unique(test_chem_res$chem)
+feats &lt;- unique(test_chem_res$feat)
 
-# Flag any problem files
-problems &lt;- check_results %&gt;% filter(!matches_expected)
-if (nrow(problems) &gt; 0) {
-  warning(&quot;These files do NOT have the expected 4 Metadata_ columns first:\n&quot;,
-          paste(problems$file, collapse = &quot;\n&quot;))
-} else {
-  message(&quot;All files check out: first 4 columns are the expected Metadata_ columns.&quot;)
-}</code></pre>
-<pre><code>## All files check out: first 4 columns are the expected Metadata_ columns.</code></pre>
-<p>#Filter for common features for catagorical analysis</p>
-<pre class="r"><code>#after simplification there are fewer features maybe stop simplifictaion
-# List of replicate folders
-rep_dirs &lt;- c(
-  rep1 = &quot;../Output/rep1&quot;,
-  rep2 = &quot;../Output/rep2&quot;,
-  rep3 = &quot;../Output/rep3&quot;
-)
+vehicle_ctrl &lt;- mahal_dist_chem |&gt;
+    dplyr::filter(chem == ctrl_group) |&gt;
+    dplyr::summarise(
+      Median = median(mahal_dist, na.rm = TRUE),
+      nMad   = mad(mahal_dist, constant = 1.4826, na.rm = TRUE)
+    )
 
-# File paths
-rep_files &lt;- file.path(
-  rep_dirs,
-  &quot;test_chem_well_pearson_0.9.csv&quot;
-)
-names(rep_files) &lt;- names(rep_dirs)
+tcpl_results_cat_i &lt;- lapply(chem_list_i, function(x) {
+    chem_data &lt;- test_chem_res[test_chem_res$chem == x, ]
 
+    lapply(feats, function(y) {
+      chem_data_y &lt;- chem_data |&gt; dplyr::filter(grepl(y, feat))
+      conc_res_modeling(chem_data_y, vehicle_ctrl)
+      
+  }) |&gt; do.call(rbind, args = _)
+  }) |&gt; do.call(rbind, args = _)</code></pre>
+<pre><code>## Warning in sqrt(1 + 4 * y/a): NaNs produced</code></pre>
+<pre><code>## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced</code></pre>
+<pre class="r"><code>  split_col &lt;- stringr::str_split_fixed(tcpl_results_cat_i$name, &quot;_&quot;, 2)
+  tcpl_results_cat_i &lt;- cbind(&quot;chem&quot; = split_col[, 1], &quot;feat&quot; = split_col[, 2], tcpl_results_cat_i[, -1])
 
-# Read each file
-rep_data &lt;- imap(rep_files, function(path, rep_name) {
-  read_csv(path, show_col_types = FALSE)
-})
+  tcpl_results_cat_i &lt;- tcpl_results_cat_i |&gt;
+    dplyr::mutate(
+      minDose = min(conc, na.rm = TRUE),
+      maxDose = max(conc, na.rm = TRUE),
+      removal_reason = dplyr::case_when(
+        hitcall &lt; 0.9   ~ &quot;low_hitcall&quot;,
+        is.na(bmdl)     ~ &quot;missing_bmdl&quot;,
+        is.na(bmdu)     ~ &quot;missing_bmdu&quot;,
+        TRUE            ~ &quot;kept&quot;
+      ),
+      keep = removal_reason == &quot;kept&quot;,
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA)
+    ) |&gt;
+    dplyr::ungroup() |&gt;
+    dplyr::filter(er &lt; 0.99)
 
+  tcpl_results_cat_i$exp_name &lt;- exp_name
 
-# Get feature names
-retained_features &lt;- map(rep_data, names)
+  # --- BMC plot ---
+BMC_plot &lt;- ggplot(tcpl_results_cat_i, aes(x = bmd, y = feat, colour = feat)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+    scale_x_log10() +
+    xlab(&quot;Best BMC (1MAD above vehicle control median) \u03BCM&quot;) +
+    ylab(&quot;Feature Category&quot;) +
+    theme_bw() +
+    theme(
+      legend.position = &quot;none&quot;,
+      axis.title.x = element_text(size = 17, margin = margin(t = 20)),
+      axis.title.y = element_text(size = 17),
+      axis.text.x  = element_text(size = 12, colour = &quot;black&quot;),
+      axis.text.y  = element_text(size = 6, colour = &quot;black&quot;, margin = margin(r = 5)),
+      strip.text.x = element_text(size = 12, face = &quot;bold&quot;),
+      strip.background = element_rect(fill = NA),
+      panel.border = element_rect(color = &quot;black&quot;, fill = NA, linewidth = 1)
+    ) +
+    facet_wrap(vars(chem)) +
+    ggtitle(paste0(&quot;Categorical BMC&quot;))
 
-
-# Intersection of feature names across all three reps
-common_features &lt;- reduce(retained_features, intersect)
-
-length(common_features)</code></pre>
-<pre><code>## [1] 186</code></pre>
-<pre class="r"><code># Keep only the common features
-rep_common &lt;- imap(rep_data, function(df, rep_name) {
-  df %&gt;%
-    dplyr::select(all_of(common_features))
-})
-
-
-# Write common-feature files
-iwalk(rep_common, function(df, rep_name) {
-  write_csv(
-    df,
+ggsave(
+    filename = file.path(plots, paste0(&quot;Categorical_BMC&quot;, &quot;.png&quot;)),
+    plot = BMC_plot, width = 25, height = 35, units = &quot;cm&quot;
+  )</code></pre>
+<pre><code>## Warning: Removed 189 rows containing missing values or values outside the scale range (`geom_point()`).</code></pre>
+<pre class="r"><code>  # --- Save tcpl results table ---
+write_csv(
+    tcpl_results_cat_i,
     file.path(
-      rep_dirs[[rep_name]],
-      &quot;test_chem_well_pearson_0.9_common.csv&quot;
-    )
-  )
-})</code></pre>
-<p>#Simplify features for catagorical analysis</p>
-<pre class="r"><code># Reformat one test_chem_well-style data frame: collapse verbose CellProfiler
-# feature names into simplified category names and set Chemical_Conc_Well_Plate
-# as the row name. Wrapped as a function so it can be applied to every
-# feature-selected variant produced by the previous notebook.
-reformat_feature_names &lt;- function(test_chem_well) {
-
-test_chem_well &lt;- as.data.frame(test_chem_well)
-variances &lt;- apply(test_chem_well, 2, var)
-variances[1:4] &lt;- 1
-
-test_chem_well &lt;- test_chem_well[, variances != 0 &amp; !is.na(variances)]
-
-feature_cols  &lt;- test_chem_well[, 5:ncol(test_chem_well)]
-
-features &lt;- data.frame(feature = colnames(test_chem_well[-c(1:4)])) %&gt;%
-   mutate(
-     feature_base = str_remove(feature, &quot;_(cells|cytoplasm|nuclei)$&quot;),
-    module = str_extract(feature, &quot;^[^_]+&quot;),
-    region = str_extract(feature, &quot;(cells|cytoplasm|nuclei)$&quot;),
-    channel1 = case_when(
-      module == &quot;Correlation&quot; ~
-        str_match(feature,
-          &quot;^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_&quot;
-        )[, 2],
-      TRUE ~ str_extract(feature, &quot;_(AGP|ER|DNA|Mito|RNA)(_|$)&quot;) %&gt;%
-               str_remove_all(&quot;_&quot;)
-    ),
-    channel2 = case_when(
-      module == &quot;Correlation&quot; ~
-        str_match(feature,
-          &quot;^Correlation_[^_]+_(AGP|ER|DNA|Mito|RNA)_(AGP|ER|DNA|Mito|RNA)_&quot;
-        )[, 3],
-      TRUE ~ NA_character_
-    )
-  ) %&gt;%
-  mutate(across(c(module, region, channel1, channel2), as.character))
-
-features &lt;- features %&gt;%
-  group_by(region, channel1, channel2, module) %&gt;%
-  mutate(cat_group = cur_group_id()) %&gt;%
-  mutate(ft_no = row_number()) %&gt;%
-  ungroup()
-
-ft_colnames &lt;- features %&gt;%
-  dplyr::select(region, channel1, channel2, module, cat_group, ft_no)
-
-#Concatenate region, channel, and module
-ft_colnames2 &lt;- apply(
-  ft_colnames[, c(&quot;region&quot;, &quot;channel1&quot;, &quot;channel2&quot;, &quot;module&quot;)],
-  1,
-  \(x) paste(na.omit(x), collapse = &quot;_&quot;)
+      pipeline_output_path, &quot;tcplfit_results_cat&quot;,
+      paste0(&quot;tcplfit_results_cat_0.9_common&quot;, &quot;.csv&quot;)))
+message(&quot;Done (category-level): &quot;, basename(path))</code></pre>
+<pre><code>## Done (category-level): test_chem_cat_pearson_0.9_common.csv</code></pre>
+<p>#NOTSQRT Category level</p>
+<pre class="r"><code>dir.create(
+  file.path(pipeline_output_path, &quot;tcplfit_results_cat_NOTSQRT&quot;),
+  showWarnings = FALSE,
+  recursive = TRUE
 )
-ft_colnames2 &lt;- as.data.frame(ft_colnames2)
-colnames(ft_colnames2) &lt;- &quot;features&quot;
-
-sample_info &lt;- as.data.frame(colnames(test_chem_well[c(1:4)]))
-colnames(sample_info) &lt;- &quot;features&quot;
-colnames(ft_colnames2) &lt;- &quot;features&quot;
-
-fts &lt;- rbind(sample_info, ft_colnames2)
-
-#Replace the original features names with the reformatted feature names
-colnames(test_chem_well) &lt;- t(fts) # run code up to here for BMDExpress formatting
-
-#remove individual metadate collomns
-#i added plate
-test_chem_well$Chemical &lt;- paste0(test_chem_well$Metadata_Chemical, &quot;_&quot;,test_chem_well$Metadata_Concentration, &quot;_&quot;, test_chem_well$Metadata_Well, &quot;_&quot;,test_chem_well$Metadata_Plate)
-
-test_chem_well &lt;- test_chem_well[, !names(test_chem_well) %in% c(&quot;Metadata_Plate&quot;, &quot;Metadata_Well&quot;,&quot;Metadata_Concentration&quot;, &quot;Metadata_Chemical&quot;)]
-
-##make chemicals info the row name
-rows &lt;- test_chem_well$Chemical
-
-rownames(test_chem_well) &lt;- rows
-
-test_chem_well &lt;- test_chem_well %&gt;%
-  dplyr::select(-Chemical)
-
-test_chem_well
-list(
-  data = test_chem_well,
-  ft_colnames2 = ft_colnames2
-)
-}
-
-# Loop over every feature-selected variant saved by the previous notebook
-# (test_chem_well.csv, test_chem_well_lowvariance.csv,
-#  test_chem_well_pearson_*.csv, test_chem_well_lowvar_pearson_*.csv, ...)
-# and write out a correspondingly-named, reformatted CSV.
-input_files &lt;- list.files(
+path &lt;- file.path(
   pipeline_output_path,
-  pattern = &quot;^test_chem_well_pearson_0\\.9_common\\.csv$&quot;,
-  full.names = TRUE
+  &quot;feature_results&quot;,
+  &quot;test_chem_cat_pearson_0.9_common.csv&quot;
 )
 
-walk(input_files, function(path) {
-  message(&quot;Reformatting: &quot;, basename(path))
+# --- Load the well-level data ---
+test_chem_well &lt;- read_csv(
+  path,
+  show_col_types = FALSE,
+  name_repair = &quot;minimal&quot;
+) |&gt;
+  as.data.frame()
 
-  df &lt;- read_csv(path, show_col_types = FALSE)
+# First column contains row names
+rownames(test_chem_well) &lt;- test_chem_well[[1]]
+test_chem_well &lt;- test_chem_well[, -1]
 
-  result &lt;- reformat_feature_names(df)
+# --- Load the matching category labels ---
+ft_path &lt;- str_replace(
+  path,
+  &quot;\\.csv$&quot;,
+  &quot;_ft_colnames2.csv&quot;
+)
 
-  reformatted &lt;- result$data
-  ft_colnames2 &lt;- result$ft_colnames2
+ft_colnames2 &lt;- read_csv(
+  ft_path,
+  show_col_types = FALSE
+)$features
 
-  out_name &lt;- str_replace(
-    basename(path),
-    &quot;^test_chem_well&quot;,
-    &quot;test_chem_cat&quot;
-  )
 
-  write.csv(
-    reformatted,
+well_data &lt;- test_chem_well
+
+#Transpose 
+test_chem_well_cat &lt;- t(test_chem_well) |&gt;
+  as.data.frame()
+
+# Add category labels as a COLUMN
+test_chem_well_cat &lt;- cbind(
+  features = ft_colnames2,
+  test_chem_well_cat
+)
+
+rownames(test_chem_well_cat) &lt;- NULL
+  
+#Filter out categories with fewer than 2 features ---
+cat_lev_data &lt;- test_chem_well_cat %&gt;%
+  group_by(features) %&gt;%
+  mutate(count = n()) %&gt;%
+  ungroup() %&gt;%
+  filter(count &gt; 1)
+cat_lev_data &lt;- cat_lev_data[,-c(ncol(cat_lev_data))]
+
+samples &lt;- colnames(cat_lev_data)[2:ncol(cat_lev_data)]
+
+ft_cats &lt;- unique(cat_lev_data$features)
+#Eliminate categories with no variance across samples
+
+cat_lev_data &lt;- lapply(ft_cats, function(x){
+  cat_dat &lt;- well_data[, grep(x, colnames(well_data))]
+  variances &lt;- apply(cat_dat, 2, var)
+  cat_dat &lt;- cat_dat[, variances != 0] 
+  cat_dat
+  }) %&gt;%
+  do.call(cbind,.)
+#PCA by category
+pca_cat &lt;- lapply(ft_cats, function(x){
+  cat_dat &lt;- cat_lev_data[, grep(x, colnames(cat_lev_data))]
+  pca &lt;- prcomp(cat_dat, center = TRUE, scale = TRUE)
+  return (pca)
+}) %&gt;%
+  setNames(ft_cats)
+
+cat_mahal_dist &lt;- lapply(ft_cats, function(x){
+  
+  pca &lt;- pca_cat[[x]]
+  
+  cumulative_prop &lt;- cumsum(pca$sdev^2)/sum(pca$sdev^2)
+  PC_95 &lt;- length(which(cumulative_prop&lt;0.95))+1
+  
+  pca_x &lt;- as.data.frame(pca$x)
+  pca_x &lt;- as.data.frame(cbind(chem = samples, pca_x)) 
+  
+  ctrl_pc &lt;- pca_x %&gt;% filter(grepl(ctrl_group, chem))
+  ctrl_pc &lt;- ctrl_pc[,-c(1)]
+  ctrl_mean &lt;- colMeans(ctrl_pc)
+  
+  cat_dat &lt;- well_data[, grep(x, colnames(well_data))]
+  zero_col &lt;- sapply(cat_dat, function(col) all(col == 0))
+  cat_dat &lt;- cat_dat[,!zero_col]
+  
+  dat &lt;- as.matrix(cat_dat) %*% pca$rotation[,1:PC_95]
+  
+  #Covariance Matrix
+  Cov &lt;- cov(dat)
+  
+  #Checkpoint
+  det(Cov)
+  isSymmetric(Cov)
+  
+  #Mahalanobis distance determination
+  
+  mahal_dist &lt;- mahalanobis(dat, ctrl_mean, Cov, inverted = F) 
+  
+  mahal_dist &lt;- as.data.frame(mahal_dist)
+  mahal_dist  &lt;- as.data.frame(sqrt(mahal_dist))
+  mahal_dist &lt;- cbind(chem = rownames(well_data), mahal_dist)
+  
+  sample_info &lt;- mahal_dist$chem
+  sample_info &lt;- tibble(sample_info) %&gt;%
+    separate(sample_info, c(&quot;chem&quot;, &quot;concentration&quot;, &quot;well&quot;, &quot;well2&quot;), sep = &quot;_&quot;, remove = T)
+  
+  sample_info$well &lt;- paste0(sample_info$well, &quot;_&quot;, sample_info$well2)
+  
+  mahal_dist &lt;- cbind(sample_info[1:3], mahal_dist = mahal_dist$mahal_dist)
+  
+  return(mahal_dist)
+  }) %&gt;%
+  setNames(ft_cats)</code></pre>
+<pre><code>## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;
+## Warning in sweep(x, 2L, center): STATS is longer than the extent of &#39;dim(x)[MARGIN]&#39;</code></pre>
+<pre class="r"><code>#pick one at random to pull chem list
+chem_list &lt;- unique(cat_mahal_dist[[&quot;cells_DNA_Granularity&quot;]][[&quot;chem&quot;]])
+
+# Separate categorical Mahalanobis distances by chemical
+mahal_dist_chem &lt;- lapply(chem_list, function(x){
+  chemical &lt;- x
+  
+  chem_dat &lt;- lapply(ft_cats, function(y){
+    chem_dat &lt;- filter(cat_mahal_dist[[y]], chem == chemical)
+    return(chem_dat)}) %&gt;%
+    setNames(ft_cats)
+  
+  chem_dat &lt;- do.call(rbind, chem_dat)
+  
+  return(chem_dat)}) %&gt;%
+  setNames(chem_list) %&gt;%
+  do.call(rbind, .)
+
+mahal_dist_chem$feat &lt;- rownames(mahal_dist_chem)
+mahal_dist_chem$feat &lt;- str_extract(mahal_dist_chem$feat, &quot;(?&lt;=\\.).*?(?=\\.)&quot;)
+rownames(mahal_dist_chem) &lt;- NULL
+
+
+#Per-chemical Mahalanobis plots
+#lapply(chem_list, function(x) {
+#  p &lt;- ggplot(
+#     mahal_dist_chem[mahal_dist_chem$chem == x, ],
+#      aes(x = as.numeric(concentration), y = mahal_dist, colour = feat)
+#    ) +
+#      geom_point() +
+#      scale_y_continuous() +
+#      scale_x_log10() +
+#       scale_color_manual(
+#    values = turbo(length(unique(mahal_dist_chem$feat)))
+#  ) +
+#      xlab(&quot;Concentration (\u03BCM)&quot;) + ylab(&quot;Mahalanobis Distance&quot;) +
+#      theme_classic() +
+#      theme(
+#        legend.position = &quot;none&quot;,
+#        axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+#        axis.title.y = element_text(size = 20, margin = margin(r = 15), angle = 90),
+#       axis.text.x = element_text(size = 11, colour = &quot;black&quot;),
+#        axis.text.y = element_text(size = 11, colour = &quot;black&quot;),
+#        strip.text.x = element_text(size = 12, face = &quot;bold&quot;),
+#        strip.background = element_rect(fill = NA),
+#        axis.line = element_line(linewidth = 1)
+#      ) +
+#      facet_wrap(vars(feat), scales = &quot;free&quot;) 
+
+# ggsave(
+#   filename = file.path(plots, paste0(x, file_label, &quot;_Categorical_mahalanobis.png&quot;)),
+#   plot = p, width = 45, height = 45, units = &quot;cm&quot;
+# )
+#  })
+
+#tcplfit2 concentration-response modeling per category ---
+mahal_dist_chem &lt;- as.data.frame(mahal_dist_chem)
+
+test_chem_res &lt;- mahal_dist_chem |&gt; dplyr::filter(chem != ctrl_group)
+
+conc_res_modeling &lt;- function(test_chem, vehicle_ctrl) {
+    row &lt;- list(
+      conc   = as.numeric(test_chem$concentration),
+      resp   = test_chem$mahal_dist,
+      bmed   = vehicle_ctrl$Median,
+      cutoff = vehicle_ctrl$nMad,
+      onesd  = vehicle_ctrl$nMad,
+      name   = paste0(test_chem$chem[1], &quot;_&quot;, test_chem$feat[1]),
+      assay  = &quot;Mahalanobis distance (cutoff = 1)&quot;
+    )
+    tcplfit2::concRespCore(
+      row, conthits = TRUE, aicc = TRUE, force.fit = FALSE, bidirectional = TRUE,
+      fitmodels = c(&quot;cnst&quot;, &quot;hill&quot;, &quot;poly1&quot;, &quot;poly2&quot;, &quot;pow&quot;, &quot;exp2&quot;, &quot;exp3&quot;, &quot;exp4&quot;, &quot;exp5&quot;)
+    )
+  }
+
+chem_list_i &lt;- unique(test_chem_res$chem)
+feats &lt;- unique(test_chem_res$feat)
+
+vehicle_ctrl &lt;- mahal_dist_chem |&gt;
+    dplyr::filter(chem == ctrl_group) |&gt;
+    dplyr::summarise(
+      Median = median(mahal_dist, na.rm = TRUE),
+      nMad   = mad(mahal_dist, constant = 1.4826, na.rm = TRUE)
+    )
+
+tcpl_results_cat_i &lt;- lapply(chem_list_i, function(x) {
+    chem_data &lt;- test_chem_res[test_chem_res$chem == x, ]
+
+    lapply(feats, function(y) {
+      chem_data_y &lt;- chem_data |&gt; dplyr::filter(grepl(y, feat))
+      conc_res_modeling(chem_data_y, vehicle_ctrl)
+      
+  }) |&gt; do.call(rbind, args = _)
+  }) |&gt; do.call(rbind, args = _)</code></pre>
+<pre><code>## Warning in sqrt(1 + 4 * y/a): NaNs produced</code></pre>
+<pre><code>## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced
+## Warning in sqrt(1 + 4 * y/a): NaNs produced</code></pre>
+<pre class="r"><code>  split_col &lt;- stringr::str_split_fixed(tcpl_results_cat_i$name, &quot;_&quot;, 2)
+  tcpl_results_cat_i &lt;- cbind(&quot;chem&quot; = split_col[, 1], &quot;feat&quot; = split_col[, 2], tcpl_results_cat_i[, -1])
+
+  tcpl_results_cat_i &lt;- tcpl_results_cat_i |&gt;
+    dplyr::mutate(
+      minDose = min(conc, na.rm = TRUE),
+      maxDose = max(conc, na.rm = TRUE),
+      removal_reason = dplyr::case_when(
+        hitcall &lt; 0.9   ~ &quot;low_hitcall&quot;,
+        is.na(bmdl)     ~ &quot;missing_bmdl&quot;,
+        is.na(bmdu)     ~ &quot;missing_bmdu&quot;,
+        TRUE            ~ &quot;kept&quot;
+      ),
+      keep = removal_reason == &quot;kept&quot;,
+      bmd  = ifelse(keep, bmd,  NA),
+      bmdl = ifelse(keep, bmdl, NA),
+      bmdu = ifelse(keep, bmdu, NA)
+    ) |&gt;
+    dplyr::ungroup() |&gt;
+    dplyr::filter(er &lt; 0.99)
+
+  tcpl_results_cat_i$exp_name &lt;- exp_name
+
+  # --- BMC plot ---
+BMC_plot &lt;- ggplot(tcpl_results_cat_i, aes(x = bmd, y = feat, colour = feat)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(xmin = bmdl, xmax = bmdu), width = 0.2) +
+    scale_x_log10() +
+    xlab(&quot;Best BMC (1MAD above vehicle control median) \u03BCM&quot;) +
+    ylab(&quot;Feature Category&quot;) +
+    theme_bw() +
+    theme(
+      legend.position = &quot;none&quot;,
+      axis.title.x = element_text(size = 17, margin = margin(t = 20)),
+      axis.title.y = element_text(size = 17),
+      axis.text.x  = element_text(size = 12, colour = &quot;black&quot;),
+      axis.text.y  = element_text(size = 6, colour = &quot;black&quot;, margin = margin(r = 5)),
+      strip.text.x = element_text(size = 12, face = &quot;bold&quot;),
+      strip.background = element_rect(fill = NA),
+      panel.border = element_rect(color = &quot;black&quot;, fill = NA, linewidth = 1)
+    ) +
+    facet_wrap(vars(chem)) +
+    ggtitle(paste0(&quot;Categorical BMC&quot;))
+
+ggsave(
+    filename = file.path(plots, paste0(&quot;Categorical_BMC_NOTQRT&quot;, &quot;.png&quot;)),
+    plot = BMC_plot, width = 25, height = 35, units = &quot;cm&quot;
+  )</code></pre>
+<pre><code>## Warning: Removed 189 rows containing missing values or values outside the scale range (`geom_point()`).</code></pre>
+<pre class="r"><code>  # --- Save tcpl results table ---
+write_csv(
+    tcpl_results_cat_i,
     file.path(
-      pipeline_output_path,
-      &quot;feature_results&quot;,
-      out_name
-    ),
-    row.names = TRUE
-  )
-
-  # Save category labels for this feature set
-  write.csv(
-    ft_colnames2,
-    file.path(
-      pipeline_output_path,
-      &quot;feature_results&quot;,
-      str_replace(
-        out_name,
-        &quot;\\.csv$&quot;,
-        &quot;_ft_colnames2.csv&quot;
-      )
-    ),
-    row.names = FALSE
-  )
-})</code></pre>
-<pre><code>## Reformatting: test_chem_well_pearson_0.9_common.csv</code></pre>
-<pre><code>## Warning in FUN(newX[, i], ...): NAs introduced by coercion
-## Warning in FUN(newX[, i], ...): NAs introduced by coercion</code></pre>
+      pipeline_output_path, &quot;tcplfit_results_cat_NOTSQRT&quot;,
+      paste0(&quot;tcplfit_results_cat_0.9_common&quot;, &quot;.csv&quot;)))
+message(&quot;Done (category-level): &quot;, basename(path))</code></pre>
+<pre><code>## Done (category-level): test_chem_cat_pearson_0.9_common.csv</code></pre>
 
 
 
